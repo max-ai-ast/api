@@ -27,6 +27,7 @@ HEADERS = {"X-API-Key": "testkey"}
 @pytest.fixture
 def app():
     app = FastAPI()
+    app.state.es = object()
     app.include_router(router)
     return app
 
@@ -37,15 +38,8 @@ def test_list_models(app):
 
     assert resp.status_code == 200
     assert resp.json() == {
-        "models": [
-            {
-                "name": "candidate_score",
-                "ready": True,
-                "metadata": {
-                    "kind": "fallback",
-                    "description": "Ranks candidates by their existing score field until inference-service ranking is added.",
-                },
-            }
+        "rankers": [
+            "candidate_score",
         ]
     }
 
@@ -65,26 +59,21 @@ def test_predict_ranks_candidates_by_score_desc(app):
 
     assert resp.status_code == 200
     assert resp.json() == {
-        "model": "candidate_score",
-        "ranked_at_uris": ["at://post/high", "at://post/mid", "at://post/low"],
         "rankings": [
             {
                 "at_uri": "at://post/high",
                 "rank": 1,
-                "score": 0.9,
-                "metadata": {"generator_name": "popularity"},
+                "rank_score": 0.9,
             },
             {
                 "at_uri": "at://post/mid",
                 "rank": 2,
-                "score": 0.4,
-                "metadata": {},
+                "rank_score": 0.4,
             },
             {
                 "at_uri": "at://post/low",
                 "rank": 3,
-                "score": 0.1,
-                "metadata": {"generator_name": "random_posts"},
+                "rank_score": 0.1,
             },
         ],
     }
@@ -104,19 +93,16 @@ def test_predict_preserves_first_duplicate_and_stable_tie_order(app):
     )
 
     assert resp.status_code == 200
-    assert resp.json()["ranked_at_uris"] == ["at://post/a", "at://post/b"]
     assert resp.json()["rankings"] == [
         {
             "at_uri": "at://post/a",
             "rank": 1,
-            "score": 0.5,
-            "metadata": {"content": "first"},
+            "rank_score": 0.5,
         },
         {
             "at_uri": "at://post/b",
             "rank": 2,
-            "score": 0.5,
-            "metadata": {"content": "second"},
+            "rank_score": 0.5,
         },
     ]
 

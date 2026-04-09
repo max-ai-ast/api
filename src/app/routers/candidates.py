@@ -10,9 +10,9 @@ POST /candidates/generate
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from ..models import CandidateGenerateRequest, CandidatePost
+from ..models import CandidateGenerateRequest, CandidateGenerateResult
 from ..lib.candidates import (
     GeneratorError,
     GeneratorNotFoundError,
@@ -30,12 +30,6 @@ logger = logging.getLogger(__name__)
 # Response models
 # ---------------------------------------------------------------------------
 
-class CandidateGenerateResponse(BaseModel):
-    """Response body returning de-duplicated candidates from all generators."""
-
-    candidates: list[CandidatePost]
-
-
 class GeneratorListResponse(BaseModel):
     """Lists available generator names."""
 
@@ -52,11 +46,11 @@ async def candidates_list_generators() -> GeneratorListResponse:
     return GeneratorListResponse(generators=list_generators())
 
 
-@router.post("/candidates/generate", response_model=CandidateGenerateResponse)
+@router.post("/candidates/generate", response_model=CandidateGenerateResult)
 async def candidates_generate(
     request: Request,
     payload: CandidateGenerateRequest,
-) -> CandidateGenerateResponse:
+) -> CandidateGenerateResult:
     """Run one or more named generators and return de-duplicated candidates.
 
     When multiple generators are specified, candidates from each are
@@ -70,4 +64,4 @@ async def candidates_generate(
     except GeneratorError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    return CandidateGenerateResponse(candidates=result.candidates)
+    return CandidateGenerateResult(candidates=result.candidates)

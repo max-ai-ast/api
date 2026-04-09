@@ -7,48 +7,51 @@ POST /rank/predict
     Rank a list of candidates and return ordered AT URIs plus ranking metadata.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from ..lib.rank import RankModelNotFoundError, RankerError, list_models, run_predict
-from ..models import RankModel, RankedCandidate, RankPredictRequest
+from ..lib.rankers import RankModelNotFoundError, RankerError, run_predict, list_rankers
+from ..models import RankPredictRequest, RankPredictResult
 from ..security import verify_api_key
 
 router = APIRouter(tags=["rank"], dependencies=[Depends(verify_api_key)])
 
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Response models
+# ---------------------------------------------------------------------------
 
 class RankModelListResponse(BaseModel):
     """Lists available ranking models."""
 
-    models: list[RankModel]
+    rankers: list[str]
 
 
-class RankPredictResponse(BaseModel):
-    """Response body for a ranking request."""
-
-    model: str
-    ranked_at_uris: list[str]
-    rankings: list[RankedCandidate]
-
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
 
 @router.get("/rank/models", response_model=RankModelListResponse)
 async def rank_list_models() -> RankModelListResponse:
     """Return the ranking models currently exposed by the API."""
-    return RankModelListResponse(models=list_models())
+    return RankModelListResponse(rankers=list_rankers())
 
 
-@router.post("/rank/predict", response_model=RankPredictResponse)
-async def rank_predict(payload: RankPredictRequest) -> RankPredictResponse:
+@router.post("/rank/predict", response_model=RankPredictResult)
+async def rank_predict(
+    request: Request,
+    payload: RankPredictRequest,
+) -> RankPredictResult:
     """Rank the supplied candidate posts."""
     try:
-        result = await run_predict(payload)
+        result = await run_predict(payload, request.app.state.es)
     except RankModelNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RankerError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return RankPredictResponse(
-        model=result.model,
-        ranked_at_uris=result.ranked_at_uris,
-        rankings=result.rankings,
-    )
+    return RankPredictResult(rankings=result.rankings)

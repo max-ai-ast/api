@@ -99,17 +99,6 @@ class CandidateGenerateResult(BaseModel):
     candidates: list[CandidatePost]
 
 
-class RankModel(BaseModel):
-    """A ranking model exposed by the API."""
-
-    name: str = Field(..., description="Rank model identifier")
-    ready: bool = Field(True, description="Whether the rank model is available")
-    metadata: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Additional model metadata returned to callers",
-    )
-
-
 class RankPredictRequest(BaseModel):
     """Describes a ranking job over a set of candidate posts."""
 
@@ -133,21 +122,12 @@ class RankedCandidate(BaseModel):
 
     at_uri: str = Field(..., description="AT URI of the ranked post")
     rank: int = Field(..., ge=1, description="1-based rank of the post")
-    score: float | None = Field(None, description="Ranking score when available")
-    metadata: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Additional ranking metadata for this candidate",
-    )
+    rank_score: float | None = Field(None, description="Ranking score when available")
 
 
 class RankPredictResult(BaseModel):
     """The ordered output of a ranking pipeline run."""
 
-    model: str = Field(..., description="Ranking model used for this result")
-    ranked_at_uris: list[str] = Field(
-        default_factory=list,
-        description="Ordered AT URIs from highest-ranked to lowest-ranked",
-    )
     rankings: list[RankedCandidate] = Field(
         default_factory=list,
         description="Per-candidate ranking data in ranked order",

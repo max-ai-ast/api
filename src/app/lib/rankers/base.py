@@ -1,0 +1,53 @@
+"""Base abstraction for candidate rankers.
+
+Each ranker has a unique name and an async `predict` method that returns a
+`RankerResult`. Rankers are registered in a global registry so they can be
+looked up by name from the API layer or composed with other internal logic.
+"""
+
+from abc import ABC, abstractmethod
+
+from pydantic import BaseModel, Field
+
+from ...models import RankPredictRequest, RankPredictResult
+
+
+class RankerResult(BaseModel):
+    """The output of a ranker invocation."""
+
+    model: str = Field(..., description="Name of the ranker that produced this result")
+    result: RankPredictResult = Field(..., description="Ordered ranking output")
+
+
+class Ranker(ABC):
+    """Abstract base class for named rankers."""
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Unique name identifying this ranker."""
+        ...
+
+    @abstractmethod
+    async def predict(self, request: RankPredictRequest) -> RankerResult:
+        """Rank the supplied candidates."""
+        ...
+
+
+_rankers: dict[str, Ranker] = {}
+
+
+def register_ranker(ranker: Ranker) -> None:
+    """Register a ranker instance by name."""
+    _rankers[ranker.name] = ranker
+
+
+def get_ranker(name: str) -> Ranker | None:
+    """Look up a registered ranker by name."""
+    return _rankers.get(name)
+
+
+def list_rankers() -> list[str]:
+    """Return all registered ranker instances."""
+    return list(_rankers.keys())
+
