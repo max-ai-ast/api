@@ -156,15 +156,17 @@ Run the setup script once per environment to configure GCP resources:
 # For production environment
 ENVIRONMENT=prod ./scripts/gcp_setup.sh
 
-# With Elasticsearch API key
-GE_ELASTICSEARCH_API_KEY="your-api-key" ./scripts/gcp_setup.sh
+# With explicit Elasticsearch configuration
+GE_ELASTICSEARCH_URL="https://custom-es:9200" \
+GE_ELASTICSEARCH_API_KEY="your-api-key" \
+./scripts/gcp_setup.sh
 ```
 
 This script will:
 
 - Enable required GCP APIs (Cloud Run, Secret Manager, etc.)
 - Create a service account with appropriate IAM roles
-- Configure access to the Elasticsearch readonly API key in Secret Manager
+- Configure the Elasticsearch connection using `GE_ELASTICSEARCH_URL` as non-secret config and `GE_ELASTICSEARCH_API_KEY` as a Secret Manager secret
 - Verify VPC connector for internal network access
 
 > **Note**: The API uses a separate readonly Elasticsearch API key (`elasticsearch-api-key-readonly`)
@@ -199,7 +201,7 @@ The deployment script will:
 
 ### Configuration Options
 
-You can override defaults using environment variables or command-line flags:
+You can override deployment defaults using environment variables or command-line flags:
 
 ```bash
 # Using environment variables
@@ -218,12 +220,13 @@ PROJECT_ID=your-project \
   --max-instances 50
 ```
 
-Available options:
+Available configuration inputs across `gcp_setup.sh` and `deploy.sh`:
 
 - `PROJECT_ID` - GCP project ID (default: greenearth-471522)
 - `REGION` - GCP region (default: us-east1)
 - `ENVIRONMENT` - Environment name (default: stage)
-- `GE_ELASTICSEARCH_URL` - Elasticsearch endpoint (auto-detected if not set)
+- `GE_ELASTICSEARCH_URL` - Elasticsearch endpoint (auto-detected by `deploy.sh` if not set)
+- `GE_ELASTICSEARCH_API_KEY` - Elasticsearch readonly API key (accepted by `gcp_setup.sh`, then stored in Secret Manager for deploys)
 - `API_INSTANCES_MIN` - Minimum instances (default: 1)
 - `API_INSTANCES_MAX` - Maximum instances (default: 10)
 
