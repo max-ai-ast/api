@@ -11,7 +11,7 @@ import os
 import httpx
 
 from ...models import RankedCandidate, CandidatePost, RankPredictResult
-from .base import Ranker, RankerError, RankerExecutionError, RankerResult
+from .base import Ranker, RankerExecutionError, RankerResult
 from ..elasticsearch import fetch_post_embeddings, fetch_recent_liked_post_uris
 
 from shared.input_data_helpers import get_padded_embedding_history_and_mask
@@ -115,7 +115,7 @@ class TwoTowerRanker(Ranker):
     async def predict(
         self, 
         es,
-        user_did: str,
+        user_did: str | None,
         candidates: list[CandidatePost]
     ) -> RankerResult:
         inference_base_url, inference_api_key, inference_max_history_len, inference_embed_dim = (
@@ -123,6 +123,10 @@ class TwoTowerRanker(Ranker):
         )
         
         ####### USER #######
+        if not user_did:
+            logger.info("No user_did passed in - required for two_tower model.")
+            return RankerResult(model=self.name, result=RankPredictResult(rankings=[]))
+        
         # 1. Get recently liked post URIs
         user_history_liked_uris = await fetch_recent_liked_post_uris(es, user_did)
 
@@ -168,15 +172,14 @@ class TwoTowerRanker(Ranker):
         output_user_embedding = output_user_embedding_list[0]
 
         ####### CANDIATE POSTS #######
-        candidate_uris = [c.at_uri for c in candidates if c.at_uri is not None]
         candidates_by_uri = {candidate.at_uri: candidate for candidate in candidates if candidate.at_uri is not None}
         
         # Get the embeddings for all the posts
-        candidate_embedding_pairs = await fetch_post_embeddings(es, candidate_uris)
+        candidate_embedding_pairs = await fetch_post_embeddings(es, list(candidates_by_uri))
         if not candidate_embedding_pairs:
             logger.info(
                 "No embeddings found for %d candidate posts of user %s",
-                len(candidate_uris),
+                len(candidates_by_uri),
                 user_did,
             )
             return RankerResult(model=self.name, result=RankPredictResult(rankings=[]))

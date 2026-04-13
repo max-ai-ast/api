@@ -45,7 +45,7 @@ class Ranker(ABC):
     async def predict(
         self, 
         es,
-        user_did: str,
+        user_did: str | None,
         candidates: list[CandidatePost]
     ) -> RankerResult:
         """Rank the supplied candidates."""

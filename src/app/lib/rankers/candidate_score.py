@@ -18,7 +18,7 @@ class CandidateScoreRanker(Ranker):
     async def predict(
         self, 
         es,
-        user_did: str,
+        user_did: str | None,
         candidates: list[CandidatePost]
     ) -> RankerResult:
         ranked_candidates = sorted(

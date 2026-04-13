@@ -6,8 +6,8 @@ posts, and returns the ranker's ordered output.
 
 import logging
 
-from ...models import CandidatePost, RankPredictRequest, RankPredictResult
-from .base import RankerError, RankerExecutionError, get_ranker, list_rankers
+from ...models import RankPredictRequest, RankPredictResult
+from .base import RankerError, RankerExecutionError, get_ranker
 from ..candidates.generate import dedup_candidates
 
 DEFAULT_RANK_MODEL = "candidate_score"

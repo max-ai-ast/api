@@ -113,7 +113,7 @@ class RankPredictRequest(BaseModel):
     )
     user_did: str | None = Field(
         None,
-        description="Optional AT Protocol DID of the user being ranked for",
+        description="AT Protocol DID of the user being ranked for",
     )
 
 
