@@ -23,6 +23,15 @@ class RankerError(Exception):
     """Raised when ranking cannot be completed for a valid request."""
 
 
+class RankerExecutionError(Exception):
+    """Raised when a ranker fails while executing."""
+
+    def __init__(self, name: str, message: str):
+        self.name = name
+        self.message = message
+        super().__init__(f"Ranker '{name}' failed: {message}")
+
+
 class Ranker(ABC):
     """Abstract base class for named rankers."""
 

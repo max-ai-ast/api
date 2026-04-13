@@ -11,43 +11,60 @@ import os
 import httpx
 
 from ...models import RankedCandidate, CandidatePost, RankPredictResult
-from .base import Ranker, RankerError, RankerResult
+from .base import Ranker, RankerError, RankerExecutionError, RankerResult
 from ..elasticsearch import fetch_post_embeddings, fetch_recent_liked_post_uris
 
 from shared.input_data_helpers import get_padded_embedding_history_and_mask
 
 
 logger = logging.getLogger(__name__)
+TWO_TOWER_MODEL_NAME = "two_tower"
 
 def get_inference_settings() -> tuple[str, str, int, int]:
     """Load inference configuration only when the two-tower ranker is used."""
     base_url = os.environ.get("GE_INFERENCE_BASE_URL", "").rstrip("/")
     if not base_url:
-        raise RankerError("GE_INFERENCE_BASE_URL environment variable is required for two_tower")
+        raise RankerExecutionError(
+            TWO_TOWER_MODEL_NAME,
+            "GE_INFERENCE_BASE_URL environment variable is required",
+        )
 
     api_key = os.environ.get("GE_INFERENCE_API_KEY")
     if not api_key:
-        raise RankerError("GE_INFERENCE_API_KEY environment variable is required for two_tower")
+        raise RankerExecutionError(
+            TWO_TOWER_MODEL_NAME,
+            "GE_INFERENCE_API_KEY environment variable is required",
+        )
 
     max_history_len_raw = os.environ.get("GE_INFERENCE_MAX_HISTORY_LEN")
     if not max_history_len_raw:
-        raise RankerError(
-            "GE_INFERENCE_MAX_HISTORY_LEN environment variable is required for two_tower"
+        raise RankerExecutionError(
+            TWO_TOWER_MODEL_NAME,
+            "GE_INFERENCE_MAX_HISTORY_LEN environment variable is required",
         )
 
     embed_dim_raw = os.environ.get("GE_INFERENCE_EMBED_DIM")
     if not embed_dim_raw:
-        raise RankerError("GE_INFERENCE_EMBED_DIM environment variable is required for two_tower")
+        raise RankerExecutionError(
+            TWO_TOWER_MODEL_NAME,
+            "GE_INFERENCE_EMBED_DIM environment variable is required",
+        )
 
     try:
         max_history_len = int(max_history_len_raw)
     except ValueError as exc:
-        raise RankerError("GE_INFERENCE_MAX_HISTORY_LEN must be an integer") from exc
+        raise RankerExecutionError(
+            TWO_TOWER_MODEL_NAME,
+            "GE_INFERENCE_MAX_HISTORY_LEN must be an integer",
+        ) from exc
 
     try:
         embed_dim = int(embed_dim_raw)
     except ValueError as exc:
-        raise RankerError("GE_INFERENCE_EMBED_DIM must be an integer") from exc
+        raise RankerExecutionError(
+            TWO_TOWER_MODEL_NAME,
+            "GE_INFERENCE_EMBED_DIM must be an integer",
+        ) from exc
 
     return base_url, api_key, max_history_len, embed_dim
 
@@ -92,7 +109,7 @@ class TwoTowerRanker(Ranker):
 
     @property
     def name(self) -> str:
-        return "two_tower"
+        return TWO_TOWER_MODEL_NAME
 
 
     async def predict(
@@ -178,8 +195,9 @@ class TwoTowerRanker(Ranker):
             api_key=inference_api_key,
         )
         if len(output_post_embeddings) != len(ranked_candidates_input):
-            raise RankerError(
-                "Two-tower post inference returned a different number of embeddings than requested"
+            raise RankerExecutionError(
+                self.name,
+                "post inference returned a different number of embeddings than requested",
             )
 
         # For each candidate post, take the dot product of its output embedding with the user output embedding

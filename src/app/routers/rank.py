@@ -12,7 +12,13 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from ..lib.rankers import RankModelNotFoundError, RankerError, run_predict, list_rankers
+from ..lib.rankers import (
+    RankModelNotFoundError,
+    RankerError,
+    RankerExecutionError,
+    list_rankers,
+    run_predict,
+)
 from ..models import RankPredictRequest, RankPredictResult
 from ..security import verify_api_key
 
@@ -53,5 +59,7 @@ async def rank_predict(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RankerError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RankerExecutionError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return RankPredictResult(rankings=result.rankings)

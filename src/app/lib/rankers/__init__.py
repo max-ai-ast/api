@@ -8,6 +8,7 @@ from ...models import RankPredictRequest, RankPredictResult
 from .base import (
     Ranker,
     RankerError,
+    RankerExecutionError,
     RankerResult,
     get_ranker,
     list_rankers,
@@ -34,6 +35,7 @@ __all__ = [
     "TwoTowerRanker",
     "Ranker",
     "RankerError",
+    "RankerExecutionError",
     "RankerResult",
     "RankModelNotFoundError",
     "RankPredictRequest",

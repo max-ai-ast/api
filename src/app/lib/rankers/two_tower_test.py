@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from ...models import CandidatePost
-from .base import RankerError
+from .base import RankerExecutionError
 from . import two_tower as two_tower_module
 from .two_tower import TwoTowerRanker
 
@@ -18,7 +18,7 @@ def test_predict_requires_inference_env_vars(monkeypatch):
 
     ranker = TwoTowerRanker()
 
-    with pytest.raises(RankerError, match="GE_INFERENCE_BASE_URL"):
+    with pytest.raises(RankerExecutionError, match="GE_INFERENCE_BASE_URL"):
         asyncio.run(
             ranker.predict(
                 es=None,
