@@ -5,7 +5,7 @@ posts, and returns the ranker's ordered output.
 """
 
 from ...models import CandidatePost, RankPredictRequest, RankPredictResult
-from .base import get_ranker, list_rankers
+from .base import RankerError, get_ranker, list_rankers
 from ..candidates.generate import dedup_candidates
 
 DEFAULT_RANK_MODEL = "candidate_score"
@@ -17,10 +17,6 @@ class RankModelNotFoundError(Exception):
     def __init__(self, name: str):
         self.name = name
         super().__init__(f"Rank model not found: {name}")
-
-
-class RankerError(Exception):
-    """Raised when ranking cannot be completed for a valid request."""
 
 
 async def run_predict(

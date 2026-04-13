@@ -11,7 +11,7 @@ import os
 import httpx
 
 from ...models import RankedCandidate, CandidatePost, RankPredictResult
-from .base import Ranker, RankerResult
+from .base import Ranker, RankerError, RankerResult
 from ..elasticsearch import fetch_post_embeddings, fetch_recent_liked_post_uris
 
 from shared.input_data_helpers import get_padded_embedding_history_and_mask
@@ -19,29 +19,47 @@ from shared.input_data_helpers import get_padded_embedding_history_and_mask
 
 logger = logging.getLogger(__name__)
 
-###### Env vars ######
-INFERENCE_BASE_URL = os.environ.get("GE_INFERENCE_BASE_URL", "").rstrip("/")
-if not INFERENCE_BASE_URL:
-    raise RuntimeError("GE_INFERENCE_BASE_URL environment variable is required")
+def get_inference_settings() -> tuple[str, str, int, int]:
+    """Load inference configuration only when the two-tower ranker is used."""
+    base_url = os.environ.get("GE_INFERENCE_BASE_URL", "").rstrip("/")
+    if not base_url:
+        raise RankerError("GE_INFERENCE_BASE_URL environment variable is required for two_tower")
 
-INFERENCE_API_KEY = os.environ.get("GE_INFERENCE_API_KEY")
-if not INFERENCE_API_KEY:
-    raise RuntimeError("GE_INFERENCE_API_KEY environment variable is required")
+    api_key = os.environ.get("GE_INFERENCE_API_KEY")
+    if not api_key:
+        raise RankerError("GE_INFERENCE_API_KEY environment variable is required for two_tower")
 
-inference_max_history_len = os.environ.get("GE_INFERENCE_MAX_HISTORY_LEN")
-if not inference_max_history_len:
-    raise RuntimeError("GE_INFERENCE_MAX_HISTORY_LEN environment variable is required")
-INFERENCE_MAX_HISTORY_LEN = int(inference_max_history_len)
+    max_history_len_raw = os.environ.get("GE_INFERENCE_MAX_HISTORY_LEN")
+    if not max_history_len_raw:
+        raise RankerError(
+            "GE_INFERENCE_MAX_HISTORY_LEN environment variable is required for two_tower"
+        )
 
-inference_embed_dim = os.environ.get("GE_INFERENCE_EMBED_DIM")
-if not inference_embed_dim:
-    raise RuntimeError("GE_INFERENCE_EMBED_DIM environment variable is required")
-INFERENCE_EMBED_DIM = int(inference_embed_dim)
+    embed_dim_raw = os.environ.get("GE_INFERENCE_EMBED_DIM")
+    if not embed_dim_raw:
+        raise RankerError("GE_INFERENCE_EMBED_DIM environment variable is required for two_tower")
+
+    try:
+        max_history_len = int(max_history_len_raw)
+    except ValueError as exc:
+        raise RankerError("GE_INFERENCE_MAX_HISTORY_LEN must be an integer") from exc
+
+    try:
+        embed_dim = int(embed_dim_raw)
+    except ValueError as exc:
+        raise RankerError("GE_INFERENCE_EMBED_DIM must be an integer") from exc
+
+    return base_url, api_key, max_history_len, embed_dim
 
 
-async def predict_post_tower_batch(post_embeddings: list[list[float]]) -> list[list[float]]:
-    url = f"{INFERENCE_BASE_URL}/models/post-tower/predict"
-    headers = {"X-API-Key": INFERENCE_API_KEY}
+async def predict_post_tower_batch(
+    post_embeddings: list[list[float]],
+    *,
+    base_url: str,
+    api_key: str,
+) -> list[list[float]]:
+    url = f"{base_url}/models/post-tower/predict"
+    headers = {"X-API-Key": api_key}
     payload = {"post_embeddings": post_embeddings}
 
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -51,9 +69,15 @@ async def predict_post_tower_batch(post_embeddings: list[list[float]]) -> list[l
         return data["outputs"]
 
 
-async def predict_user_tower_single(history_embeddings: list[list[float]], history_mask: list[bool]) -> list[list[float]]:
-    url = f"{INFERENCE_BASE_URL}/models/user-tower/predict"
-    headers = {"X-API-Key": INFERENCE_API_KEY}
+async def predict_user_tower_single(
+    history_embeddings: list[list[float]],
+    history_mask: list[bool],
+    *,
+    base_url: str,
+    api_key: str,
+) -> list[list[float]]:
+    url = f"{base_url}/models/user-tower/predict"
+    headers = {"X-API-Key": api_key}
     payload = {"history_embeddings": history_embeddings, "history_mask": history_mask}
 
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -77,6 +101,9 @@ class TwoTowerRanker(Ranker):
         user_did: str,
         candidates: list[CandidatePost]
     ) -> RankerResult:
+        inference_base_url, inference_api_key, inference_max_history_len, inference_embed_dim = (
+            get_inference_settings()
+        )
         
         ####### USER #######
         # 1. Get recently liked post URIs
@@ -101,14 +128,19 @@ class TwoTowerRanker(Ranker):
         # (This function uses numpy arrays because it is faster for training).
         user_history_padded_np, history_mask_np = get_padded_embedding_history_and_mask(
             user_history_vectors,
-            max_history_len=INFERENCE_MAX_HISTORY_LEN,
-            embed_dim=INFERENCE_EMBED_DIM,
+            max_history_len=inference_max_history_len,
+            embed_dim=inference_embed_dim,
         )
         user_history_padded = user_history_padded_np.tolist()
         history_mask = history_mask_np.tolist()
         
         # Call the inference API for the user tower
-        output_user_embedding_list = await predict_user_tower_single(user_history_padded, history_mask)
+        output_user_embedding_list = await predict_user_tower_single(
+            user_history_padded,
+            history_mask,
+            base_url=inference_base_url,
+            api_key=inference_api_key,
+        )
         if len(output_user_embedding_list) != 1:
             logger.info("Unexpected output length from user tower (expected a single embedding): %s", len(output_user_embedding_list))
             return RankerResult(model=self.name, result=RankPredictResult(rankings=[]))
@@ -128,7 +160,11 @@ class TwoTowerRanker(Ranker):
             return RankerResult(model=self.name, result=RankPredictResult(rankings=[]))
 
         # Call the post tower for the whole batch
-        output_post_embeddings = await predict_post_tower_batch(input_post_embeddings)
+        output_post_embeddings = await predict_post_tower_batch(
+            input_post_embeddings,
+            base_url=inference_base_url,
+            api_key=inference_api_key,
+        )
 
         # For each candidate post, take the dot product of its output embedding with the user output embedding
         final_scores = []

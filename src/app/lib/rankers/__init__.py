@@ -7,6 +7,7 @@ the `/rank` API.
 from ...models import RankPredictRequest, RankPredictResult
 from .base import (
     Ranker,
+    RankerError,
     RankerResult,
     get_ranker,
     list_rankers,
@@ -15,7 +16,6 @@ from .base import (
 from .predict import (
     DEFAULT_RANK_MODEL,
     RankModelNotFoundError,
-    RankerError,
     dedup_candidates,
     run_predict,
 )

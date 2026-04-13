@@ -19,6 +19,10 @@ class RankerResult(BaseModel):
     result: RankPredictResult = Field(..., description="Ordered ranking output")
 
 
+class RankerError(Exception):
+    """Raised when ranking cannot be completed for a valid request."""
+
+
 class Ranker(ABC):
     """Abstract base class for named rankers."""
 
@@ -55,4 +59,3 @@ def get_ranker(name: str) -> Ranker | None:
 def list_rankers() -> list[str]:
     """Return all registered ranker instances."""
     return list(_rankers.keys())
-
