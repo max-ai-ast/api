@@ -43,13 +43,6 @@ def get_inference_settings() -> tuple[str, str, int, int]:
             "GE_INFERENCE_MAX_HISTORY_LEN environment variable is required",
         )
 
-    embed_dim_raw = os.environ.get("GE_INFERENCE_EMBED_DIM")
-    if not embed_dim_raw:
-        raise RankerExecutionError(
-            TWO_TOWER_MODEL_NAME,
-            "GE_INFERENCE_EMBED_DIM environment variable is required",
-        )
-
     try:
         max_history_len = int(max_history_len_raw)
     except ValueError as exc:
@@ -58,15 +51,10 @@ def get_inference_settings() -> tuple[str, str, int, int]:
             "GE_INFERENCE_MAX_HISTORY_LEN must be an integer",
         ) from exc
 
-    try:
-        embed_dim = int(embed_dim_raw)
-    except ValueError as exc:
-        raise RankerExecutionError(
-            TWO_TOWER_MODEL_NAME,
-            "GE_INFERENCE_EMBED_DIM must be an integer",
-        ) from exc
+    # This is hard-coded because we do not expect this to change
+    inference_embed_dim = 384
 
-    return base_url, api_key, max_history_len, embed_dim
+    return base_url, api_key, max_history_len, inference_embed_dim
 
 
 async def predict_post_tower_batch(

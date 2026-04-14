@@ -1,12 +1,36 @@
-"""Tests for ranker pipeline error handling."""
+"""Tests for the shared ranker pipeline."""
 
 import asyncio
 
 import pytest
 
-from ...models import CandidatePost, RankPredictRequest
+from ...models import CandidatePost, RankPredictRequest, RankPredictResult, RankedCandidate
 from . import predict as predict_module
 from .base import RankerError, RankerExecutionError
+
+
+class EchoRanker:
+    @property
+    def name(self) -> str:
+        return "echo"
+
+    async def predict(self, es, user_did, candidates):
+        return type(
+            "EchoResult",
+            (),
+            {
+                "result": RankPredictResult(
+                    rankings=[
+                        RankedCandidate(
+                            at_uri=candidate.at_uri,
+                            rank=idx,
+                            rank_score=candidate.score,
+                        )
+                        for idx, candidate in enumerate(candidates, start=1)
+                    ]
+                )
+            },
+        )()
 
 
 class ExplodingRanker:
@@ -32,6 +56,30 @@ def test_run_predict_wraps_unexpected_ranker_failure(monkeypatch):
                 es=object(),
             )
         )
+
+
+def test_run_predict_preserves_duplicate_candidates(monkeypatch):
+    monkeypatch.setattr(predict_module, "get_ranker", lambda name: EchoRanker())
+
+    result = asyncio.run(
+        predict_module.run_predict(
+            RankPredictRequest(
+                model="echo",
+                candidates=[
+                    CandidatePost(at_uri="at://post/a", score=0.5),
+                    CandidatePost(at_uri="at://post/a", score=0.9),
+                    CandidatePost(at_uri="at://post/b", score=0.4),
+                ],
+            ),
+            es=object(),
+        )
+    )
+
+    assert result.rankings == [
+        RankedCandidate(at_uri="at://post/a", rank=1, rank_score=0.5),
+        RankedCandidate(at_uri="at://post/a", rank=2, rank_score=0.9),
+        RankedCandidate(at_uri="at://post/b", rank=3, rank_score=0.4),
+    ]
 
 
 def test_run_predict_requires_user_did_for_two_tower():

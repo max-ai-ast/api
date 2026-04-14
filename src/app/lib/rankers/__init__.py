@@ -17,7 +17,6 @@ from .base import (
 from .predict import (
     DEFAULT_RANK_MODEL,
     RankModelNotFoundError,
-    dedup_candidates,
     run_predict,
 )
 from .candidate_score import CandidateScoreRanker
@@ -40,7 +39,6 @@ __all__ = [
     "RankModelNotFoundError",
     "RankPredictRequest",
     "RankPredictResult",
-    "dedup_candidates",
     "get_ranker",
     "list_rankers",
     "register_ranker",

@@ -1,11 +1,17 @@
 """Tests for the rank router."""
 
+import asyncio
 import os
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from ..lib.rankers import RankerExecutionError
+from ..models import CandidatePost, RankPredictRequest
+from . import rank as rank_module
 from .rank import router
 
 
@@ -80,7 +86,7 @@ def test_predict_ranks_candidates_by_score_desc(app):
     }
 
 
-def test_predict_preserves_first_duplicate_and_stable_tie_order(app):
+def test_predict_keeps_duplicate_candidates_and_stable_tie_order(app):
     client = TestClient(app, headers=HEADERS)
     resp = client.post(
         "/rank/predict",
@@ -98,11 +104,16 @@ def test_predict_preserves_first_duplicate_and_stable_tie_order(app):
         {
             "at_uri": "at://post/a",
             "rank": 1,
+            "rank_score": 0.9,
+        },
+        {
+            "at_uri": "at://post/a",
+            "rank": 2,
             "rank_score": 0.5,
         },
         {
             "at_uri": "at://post/b",
-            "rank": 2,
+            "rank": 3,
             "rank_score": 0.5,
         },
     ]
@@ -140,3 +151,37 @@ def test_predict_requires_auth(app):
     )
 
     assert resp.status_code == 401
+
+
+def test_rank_predict_maps_ranker_execution_error_to_502(monkeypatch):
+    async def fake_run_predict(payload, es):
+        raise RankerExecutionError("two_tower", "downstream boom")
+
+    monkeypatch.setattr(rank_module, "run_predict", fake_run_predict)
+
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(es=object())))
+    payload = RankPredictRequest(
+        model="two_tower",
+        user_did="did:plc:user1",
+        candidates=[CandidatePost(at_uri="at://post/1", score=0.5)],
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(rank_module.rank_predict(request, payload))
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.detail == "Ranker 'two_tower' failed: downstream boom"
+
+
+def test_rank_predict_rejects_two_tower_without_user_did():
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(es=object())))
+    payload = RankPredictRequest(
+        model="two_tower",
+        candidates=[CandidatePost(at_uri="at://post/1", score=0.5)],
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(rank_module.rank_predict(request, payload))
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "user_did is required for two_tower"

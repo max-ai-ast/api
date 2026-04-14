@@ -14,7 +14,6 @@ def test_predict_requires_inference_env_vars(monkeypatch):
     monkeypatch.delenv("GE_INFERENCE_BASE_URL", raising=False)
     monkeypatch.delenv("GE_INFERENCE_API_KEY", raising=False)
     monkeypatch.delenv("GE_INFERENCE_MAX_HISTORY_LEN", raising=False)
-    monkeypatch.delenv("GE_INFERENCE_EMBED_DIM", raising=False)
 
     ranker = TwoTowerRanker()
 

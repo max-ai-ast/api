@@ -1,14 +1,13 @@
 """Shared ranking pipeline.
 
-Given a `RankPredictRequest`, resolves a named ranker, de-duplicates candidate
-posts, and returns the ranker's ordered output.
+Given a `RankPredictRequest`, resolves a named ranker and returns the ranker's
+ordered output.
 """
 
 import logging
 
 from ...models import RankPredictRequest, RankPredictResult
 from .base import RankerError, RankerExecutionError, get_ranker
-from ..candidates.generate import dedup_candidates
 
 DEFAULT_RANK_MODEL = "candidate_score"
 TWO_TOWER_MODEL = "two_tower"
@@ -40,9 +39,8 @@ async def run_predict(
     if model_name == TWO_TOWER_MODEL and not request.user_did:
         raise RankerError("user_did is required for two_tower")
 
-    deduped_candidates = dedup_candidates(request.candidates)
     try:
-        result = await ranker.predict(es, request.user_did, deduped_candidates)
+        result = await ranker.predict(es, request.user_did, request.candidates)
     except RankerError:
         raise
     except RankerExecutionError:
