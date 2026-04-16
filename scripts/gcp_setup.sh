@@ -13,8 +13,8 @@ ENVIRONMENT="stage"
 FIRESTORE_LOCATION=""
 
 # Elasticsearch configuration - only API key is secret, URL is public
-ELASTICSEARCH_URL="INTERNAL_LB_PLACEHOLDER"
-ELASTICSEARCH_API_KEY=""
+GE_ELASTICSEARCH_URL="INTERNAL_LB_PLACEHOLDER"
+GE_ELASTICSEARCH_API_KEY=""
 
 # API authentication
 API_KEY=""
@@ -70,9 +70,10 @@ validate_config() {
     fi
 
     log_info "Configuration validation complete."
-    log_info "Using Elasticsearch URL: $ELASTICSEARCH_URL"
+    log_info "Using Elasticsearch URL: $GE_ELASTICSEARCH_URL"
+    log_info "Using inference API key secret: $(get_inference_api_key_secret)"
 
-    if [ -n "$ELASTICSEARCH_API_KEY" ]; then
+    if [ -n "$GE_ELASTICSEARCH_API_KEY" ]; then
         log_info "Elasticsearch API key provided - will be stored/updated in Secret Manager"
     else
         log_warn "Elasticsearch API key not provided - skipping secret creation (assuming it already exists)"
@@ -132,6 +133,14 @@ get_firestore_api_key_display_name() {
         echo "greenearth-firestore-prod"
     else
         echo "greenearth-firestore-stage"
+    fi
+}
+
+get_inference_api_key_secret() {
+    if [ "$ENVIRONMENT" = "prod" ]; then
+        echo "inference-api-key-prod"
+    else
+        echo "inference-api-key-stage"
     fi
 }
 
@@ -245,6 +254,25 @@ ensure_firestore_api_key_secret() {
         --condition=None > /dev/null 2>&1 || log_info "Service account already has access to $key_secret"
 }
 
+ensure_inference_api_key_secret_access() {
+    local sa_email="api-runner-$ENVIRONMENT@$PROJECT_ID.iam.gserviceaccount.com"
+    local inference_secret
+    inference_secret="$(get_inference_api_key_secret)"
+
+    log_info "Ensuring service account access to inference API key secret: $inference_secret"
+
+    if ! gcloud secrets describe "$inference_secret" > /dev/null 2>&1; then
+        log_warn "Inference API key secret does not exist: $inference_secret"
+        log_warn "Create it in Secret Manager before deploying the API"
+        return 1
+    fi
+
+    gcloud secrets add-iam-policy-binding "$inference_secret" \
+        --member="serviceAccount:$sa_email" \
+        --role="roles/secretmanager.secretAccessor" \
+        --condition=None > /dev/null 2>&1 || log_info "Service account already has access to $inference_secret"
+}
+
 create_service_account() {
     log_info "Creating service account for API..."
 
@@ -311,13 +339,13 @@ setup_secrets() {
     fi
 
     # Elasticsearch API key
-    if [ -n "$ELASTICSEARCH_API_KEY" ] && [ "$ELASTICSEARCH_API_KEY" != "your-api-key" ]; then
+    if [ -n "$GE_ELASTICSEARCH_API_KEY" ] && [ "$GE_ELASTICSEARCH_API_KEY" != "your-api-key" ]; then
         if ! gcloud secrets describe "$es_api_key_secret" > /dev/null 2>&1; then
-            echo -n "$ELASTICSEARCH_API_KEY" | gcloud secrets create "$es_api_key_secret" --data-file=-
+            echo -n "$GE_ELASTICSEARCH_API_KEY" | gcloud secrets create "$es_api_key_secret" --data-file=-
             log_info "Elasticsearch API key secret created: $es_api_key_secret"
         else
             log_info "Elasticsearch API key secret already exists: $es_api_key_secret. Updating..."
-            echo -n "$ELASTICSEARCH_API_KEY" | gcloud secrets versions add "$es_api_key_secret" --data-file=-
+            echo -n "$GE_ELASTICSEARCH_API_KEY" | gcloud secrets versions add "$es_api_key_secret" --data-file=-
             log_info "Elasticsearch API key secret updated: $es_api_key_secret"
         fi
 
@@ -446,8 +474,8 @@ fetch_elasticsearch_api_key() {
     # Check if the target secret exists
     if gcloud secrets describe "$es_api_key_secret" > /dev/null 2>&1; then
         log_info "Secret '$es_api_key_secret' exists in Secret Manager"
-        ELASTICSEARCH_API_KEY=$(gcloud secrets versions access latest --secret="$es_api_key_secret" 2>/dev/null)
-        if [ -n "$ELASTICSEARCH_API_KEY" ]; then
+        GE_ELASTICSEARCH_API_KEY=$(gcloud secrets versions access latest --secret="$es_api_key_secret" 2>/dev/null)
+        if [ -n "$GE_ELASTICSEARCH_API_KEY" ]; then
             log_info "Successfully fetched ES API key from Secret Manager"
             return 0
         fi
@@ -472,14 +500,15 @@ main() {
     ensure_firestore_database
     ensure_feed_cache_ttl_policy
     ensure_firestore_api_key_secret
+    ensure_inference_api_key_secret_access
 
     # Fetch ES API key from K8s unless disabled or already provided
-    if [ "$FETCH_ES_KEY" = true ] && [ -z "$ELASTICSEARCH_API_KEY" ]; then
+    if [ "$FETCH_ES_KEY" = true ] && [ -z "$GE_ELASTICSEARCH_API_KEY" ]; then
         if ! fetch_elasticsearch_api_key; then
             log_warn "Failed to fetch ES API key. Continuing with setup..."
         fi
-    elif [ -n "$ELASTICSEARCH_API_KEY" ]; then
-        log_info "Using provided ELASTICSEARCH_API_KEY (skipping K8s fetch)"
+    elif [ -n "$GE_ELASTICSEARCH_API_KEY" ]; then
+        log_info "Using provided GE_ELASTICSEARCH_API_KEY (skipping K8s fetch)"
     fi
 
     setup_secrets
@@ -516,11 +545,11 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --elasticsearch-url)
-            ELASTICSEARCH_URL="$2"
+            GE_ELASTICSEARCH_URL="$2"
             shift 2
             ;;
         --elasticsearch-api-key)
-            ELASTICSEARCH_API_KEY="$2"
+            GE_ELASTICSEARCH_API_KEY="$2"
             shift 2
             ;;
         --api-key)
@@ -549,6 +578,9 @@ while [[ $# -gt 0 ]]; do
             echo "  --api-key KEY            API key for authentication (stored in Secret Manager)"
             echo "  --bsky-app-password PWD  Bluesky app password (stored in Secret Manager)"
             echo "  --no-fetch-es-key        Skip fetching ES API key from K8s"
+            echo ""
+            echo "Existing inference secrets:"
+            echo "  inference-api-key-stage / inference-api-key-prod"
             echo "  --help                   Show this help message"
             echo ""
             echo "Examples:"

@@ -1,4 +1,5 @@
 import base64
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -96,6 +97,41 @@ class CandidateGenerateResult(BaseModel):
     """The output of a generation pipeline run."""
 
     candidates: list[CandidatePost]
+
+
+class RankPredictRequest(BaseModel):
+    """Describes a ranking job over a set of candidate posts."""
+
+    candidates: list[CandidatePost] = Field(
+        ...,
+        min_length=1,
+        description="Candidates to rank in the same shape returned by /candidates/generate",
+    )
+    model: str | None = Field(
+        None,
+        description="Optional ranking model identifier. Defaults to the service default.",
+    )
+    user_did: str = Field(
+        ...,
+        description="AT Protocol DID of the user being ranked for",
+    )
+
+
+class RankedCandidate(BaseModel):
+    """A single ranked candidate and any metadata produced during ranking."""
+
+    at_uri: str = Field(..., description="AT URI of the ranked post")
+    rank: int = Field(..., ge=1, description="1-based rank of the post")
+    rank_score: float | None = Field(None, description="Ranking score when available")
+
+
+class RankPredictResult(BaseModel):
+    """The ordered output of a ranking pipeline run."""
+
+    rankings: list[RankedCandidate] = Field(
+        default_factory=list,
+        description="Per-candidate ranking data in ranked order",
+    )
 
 
 class FeedConfig(BaseModel):

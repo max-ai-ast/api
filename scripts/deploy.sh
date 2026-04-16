@@ -15,7 +15,11 @@ REGION="us-east1"
 ENVIRONMENT="stage"
 
 # Elasticsearch configuration
-ELASTICSEARCH_URL="INTERNAL_LB_PLACEHOLDER"
+GE_ELASTICSEARCH_URL="INTERNAL_LB_PLACEHOLDER"
+
+# Inference configuration
+GE_INFERENCE_BASE_URL="${GE_INFERENCE_BASE_URL:-}"
+GE_INFERENCE_MAX_HISTORY_LEN="128"
 
 # Service configuration
 API_INSTANCES_MIN="1"
@@ -56,6 +60,17 @@ validate_config() {
     # Set gcloud project
     gcloud config set project "$PROJECT_ID"
 
+    if ! [[ "$GE_INFERENCE_MAX_HISTORY_LEN" =~ ^[0-9]+$ ]]; then
+        log_error "GE_INFERENCE_MAX_HISTORY_LEN must be an integer"
+        exit 1
+    fi
+
+    if [ -n "$GE_INFERENCE_BASE_URL" ]; then
+        log_info "Using inference base URL: $GE_INFERENCE_BASE_URL"
+    else
+        log_warn "GE_INFERENCE_BASE_URL not provided - two_tower ranker will fail if invoked"
+    fi
+
     log_info "Configuration validation complete."
 }
 
@@ -80,8 +95,8 @@ get_elasticsearch_internal_lb_ip() {
     log_info "Getting Elasticsearch internal load balancer IP..."
 
     # If user has explicitly set a URL, use it
-    if [ "$ELASTICSEARCH_URL" != "INTERNAL_LB_PLACEHOLDER" ]; then
-        log_info "Using user-provided Elasticsearch URL: $ELASTICSEARCH_URL"
+    if [ "$GE_ELASTICSEARCH_URL" != "INTERNAL_LB_PLACEHOLDER" ]; then
+        log_info "Using user-provided Elasticsearch URL: $GE_ELASTICSEARCH_URL"
         return
     fi
 
@@ -93,8 +108,8 @@ get_elasticsearch_internal_lb_ip() {
 
         if [ -n "$lb_ip" ] && [ "$lb_ip" != "null" ]; then
             # Use the internal load balancer IP
-            ELASTICSEARCH_URL="https://$lb_ip:9200"
-            log_info "Using internal load balancer IP: $ELASTICSEARCH_URL"
+            GE_ELASTICSEARCH_URL="https://$lb_ip:9200"
+            log_info "Using internal load balancer IP: $GE_ELASTICSEARCH_URL"
             log_warn "Note: Certificate verification may fail for IP-based connections"
             log_warn "Services should be configured to skip certificate verification for internal LB"
         else
@@ -185,11 +200,13 @@ deploy_api_service() {
     # Stage uses no suffix for backwards compatibility, prod uses -prod suffix
     # API uses the readonly key since it only needs read access to Elasticsearch
     local es_api_key_secret="elasticsearch-api-key-readonly"
+    local inference_api_key_secret="inference-api-key-stage"
     local api_key_secret="api-key"
     local firestore_api_key_secret="firestore-api-key-stage"
     local firestore_database="greenearth-stage"
     if [ "$ENVIRONMENT" = "prod" ]; then
         es_api_key_secret="elasticsearch-api-key-readonly-prod"
+        inference_api_key_secret="inference-api-key-prod"
         api_key_secret="api-key-prod"
         firestore_api_key_secret="firestore-api-key-prod"
         firestore_database="greenearth-prod"
@@ -210,13 +227,19 @@ deploy_api_service() {
     # Set environment variables
     deploy_cmd="$deploy_cmd --set-env-vars=ENVIRONMENT=$ENVIRONMENT"
     deploy_cmd="$deploy_cmd --set-env-vars=LOG_LEVEL=info"
-    deploy_cmd="$deploy_cmd --set-env-vars=GE_ELASTICSEARCH_URL=$ELASTICSEARCH_URL"
+    deploy_cmd="$deploy_cmd --set-env-vars=GE_ELASTICSEARCH_URL=$GE_ELASTICSEARCH_URL"
     deploy_cmd="$deploy_cmd --set-env-vars=GE_ELASTICSEARCH_VERIFY_SSL=false"
     deploy_cmd="$deploy_cmd --set-env-vars=GE_FIRESTORE_PROJECT=$PROJECT_ID"
     deploy_cmd="$deploy_cmd --set-env-vars=GE_FIRESTORE_DATABASE=$firestore_database"
+    deploy_cmd="$deploy_cmd --set-env-vars=GE_INFERENCE_MAX_HISTORY_LEN=$GE_INFERENCE_MAX_HISTORY_LEN"
+
+    if [ -n "$GE_INFERENCE_BASE_URL" ]; then
+        deploy_cmd="$deploy_cmd --set-env-vars=GE_INFERENCE_BASE_URL=$GE_INFERENCE_BASE_URL"
+    fi
 
     # Add secrets with environment-specific names
     deploy_cmd="$deploy_cmd --set-secrets=GE_ELASTICSEARCH_API_KEY=$es_api_key_secret:latest"
+    deploy_cmd="$deploy_cmd --set-secrets=GE_INFERENCE_API_KEY=$inference_api_key_secret:latest"
     deploy_cmd="$deploy_cmd --set-secrets=API_KEY=$api_key_secret:latest"
     deploy_cmd="$deploy_cmd --set-secrets=GE_FIRESTORE_API_KEY=$firestore_api_key_secret:latest"
 
@@ -338,7 +361,7 @@ main() {
     verify_vpc_connector
 
     # Configure kubectl if needed for ES URL auto-detection
-    if [ "$ELASTICSEARCH_URL" = "INTERNAL_LB_PLACEHOLDER" ]; then
+    if [ "$GE_ELASTICSEARCH_URL" = "INTERNAL_LB_PLACEHOLDER" ]; then
         configure_kubectl
     fi
 
@@ -367,7 +390,15 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --elasticsearch-url)
-            ELASTICSEARCH_URL="$2"
+            GE_ELASTICSEARCH_URL="$2"
+            shift 2
+            ;;
+        --inference-base-url)
+            GE_INFERENCE_BASE_URL="$2"
+            shift 2
+            ;;
+        --inference-max-history-len)
+            GE_INFERENCE_MAX_HISTORY_LEN="$2"
             shift 2
             ;;
         --min-instances)
@@ -390,6 +421,9 @@ while [[ $# -gt 0 ]]; do
             echo "  --region REGION          GCP region (default: us-east1)"
             echo "  --environment ENV        Environment name (default: stage)"
             echo "  --elasticsearch-url URL  Elasticsearch URL (default: INTERNAL_LB_PLACEHOLDER)"
+            echo "  --inference-base-url URL Inference service base URL (required for two_tower)"
+            echo "  --inference-max-history-len N"
+            echo "                           Inference history length (default: 128)"
             echo "  --min-instances N        Minimum instances (default: 1)"
             echo "  --max-instances N        Maximum instances (default: 10)"
             echo "  --timeout SECONDS        Cloud Run request timeout (default: 60)"
