@@ -2,6 +2,12 @@
 
 An API server for handling bluesky content recommendation requests.
 
+## Contributing
+
+Interested in contributing? We'd love to have you! 
+
+First, please join our discord and introduce yourself: https://discord.com/invite/8bWEyrkrJC. Unless you've joined the discord and engaged with the community there, all issues/PRs will be auto-closed.
+
 ## Prerequisites
 
 - Python 3.13+
