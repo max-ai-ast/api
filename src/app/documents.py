@@ -45,3 +45,9 @@ class FeedCacheDocument(BaseModel):
 
     items: list[str] = Field(default_factory=list, description="Cached AT URI list")
     expires_at: datetime = Field(..., description="UTC expiration timestamp for this cache entry")
+
+
+class FeedActivityDocument(BaseModel):
+    feed_name: str = Field(..., description="AT Protocol rkey of the feed (also the document ID)")
+    first_seen_at: datetime = Field(default_factory=_utcnow, description="When the user first loaded this feed")
+    last_seen_at: datetime = Field(default_factory=_utcnow, description="Most recent time the user loaded this feed")

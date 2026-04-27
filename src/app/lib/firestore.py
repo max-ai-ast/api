@@ -13,11 +13,12 @@ from datetime import datetime, timezone
 
 from google.cloud.firestore import AsyncClient  # type: ignore[import-untyped]
 
-from ..documents import UserDocument
+from ..documents import FeedActivityDocument, UserDocument
 
 logger = logging.getLogger(__name__)
 
 USERS_COLLECTION = "users"
+FEED_ACTIVITY_COLLECTION = "feed_activity"
 
 
 def init_firestore_client() -> AsyncClient:
@@ -101,3 +102,61 @@ async def upsert_user(db: AsyncClient, user_did: str, username: str) -> UserDocu
     )
     await ref.set(user.model_dump())
     return user
+
+
+# ---------------------------------------------------------------------------
+# Feed activity
+# ---------------------------------------------------------------------------
+
+
+async def get_feed_activity(db: AsyncClient, user_did: str, feed_name: str) -> FeedActivityDocument | None:
+    """Fetch a feed activity document, or return ``None`` if not found."""
+    doc = await (
+        db.collection(USERS_COLLECTION)
+        .document(user_did)
+        .collection(FEED_ACTIVITY_COLLECTION)
+        .document(feed_name)
+        .get()
+    )
+    if not doc.exists:
+        return None
+    data = doc.to_dict()
+    if data is None:
+        return None
+    return FeedActivityDocument.model_validate(data)
+
+
+async def upsert_feed_activity(db: AsyncClient, user_did: str, feed_name: str) -> FeedActivityDocument:
+    """Record that a user loaded a feed.
+
+    On first visit creates the document with both timestamps set to now.
+    On subsequent visits updates only ``last_seen_at``; ``first_seen_at`` is
+    never overwritten.
+    """
+    ref = (
+        db.collection(USERS_COLLECTION)
+        .document(user_did)
+        .collection(FEED_ACTIVITY_COLLECTION)
+        .document(feed_name)
+    )
+    doc = await ref.get()
+
+    now = datetime.now(timezone.utc)
+
+    if doc.exists:
+        data = doc.to_dict()
+        if data is None:
+            raise ValueError(
+                f"Firestore feed_activity document exists but to_dict() returned None for {user_did}/{feed_name}"
+            )
+        await ref.update({"last_seen_at": now})
+        data["last_seen_at"] = now
+        return FeedActivityDocument.model_validate(data)
+
+    activity = FeedActivityDocument(
+        feed_name=feed_name,
+        first_seen_at=now,
+        last_seen_at=now,
+    )
+    await ref.set(activity.model_dump())
+    return activity

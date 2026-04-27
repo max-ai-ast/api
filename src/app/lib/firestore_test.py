@@ -10,8 +10,10 @@ import pytest
 from ..documents import UserDocument
 from ..lib.firestore import (
     USERS_COLLECTION,
+    get_feed_activity,
     get_user,
     init_firestore_client,
+    upsert_feed_activity,
     upsert_user,
 )
 
@@ -22,6 +24,14 @@ from ..lib.firestore import (
 
 USER_DID = "did:plc:testuser123"
 USERNAME = "testuser.bsky.app"
+FEED_NAME = "basic-similarity"
+
+
+def _mock_feed_activity_client():
+    db = MagicMock()
+    doc_ref = AsyncMock()
+    db.collection.return_value.document.return_value.collection.return_value.document.return_value = doc_ref
+    return db, doc_ref
 
 
 def _mock_doc_snapshot(exists: bool, data: dict | None = None) -> MagicMock:
@@ -210,3 +220,92 @@ class TestUpsertUser:
         update_fields = doc_ref.update.call_args[0][0]
         assert update_fields["username"] == USERNAME
         assert "updated_at" in update_fields
+
+
+# ---------------------------------------------------------------------------
+# get_feed_activity
+# ---------------------------------------------------------------------------
+
+
+class TestGetFeedActivity:
+    @pytest.mark.asyncio
+    async def test_returns_doc_when_exists(self):
+        db, doc_ref = _mock_feed_activity_client()
+        now = datetime.now(timezone.utc)
+        doc_ref.get.return_value = _mock_doc_snapshot(True, {
+            "feed_name": FEED_NAME,
+            "first_seen_at": now,
+            "last_seen_at": now,
+        })
+
+        activity = await get_feed_activity(db, USER_DID, FEED_NAME)
+
+        assert activity is not None
+        assert activity.feed_name == FEED_NAME
+        assert activity.first_seen_at == now
+        assert activity.last_seen_at == now
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_not_found(self):
+        db, doc_ref = _mock_feed_activity_client()
+        doc_ref.get.return_value = _mock_doc_snapshot(False)
+
+        activity = await get_feed_activity(db, USER_DID, FEED_NAME)
+
+        assert activity is None
+
+
+# ---------------------------------------------------------------------------
+# upsert_feed_activity
+# ---------------------------------------------------------------------------
+
+
+class TestUpsertFeedActivity:
+    @pytest.mark.asyncio
+    async def test_creates_new_doc_on_first_visit(self):
+        db, doc_ref = _mock_feed_activity_client()
+        doc_ref.get.return_value = _mock_doc_snapshot(False)
+
+        activity = await upsert_feed_activity(db, USER_DID, FEED_NAME)
+
+        assert activity.feed_name == FEED_NAME
+        assert isinstance(activity.first_seen_at, datetime)
+        assert isinstance(activity.last_seen_at, datetime)
+        doc_ref.set.assert_called_once()
+        written = doc_ref.set.call_args[0][0]
+        assert written["feed_name"] == FEED_NAME
+        assert "first_seen_at" in written
+        assert "last_seen_at" in written
+
+    @pytest.mark.asyncio
+    async def test_updates_only_last_seen_at_on_revisit(self):
+        db, doc_ref = _mock_feed_activity_client()
+        original_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        doc_ref.get.return_value = _mock_doc_snapshot(True, {
+            "feed_name": FEED_NAME,
+            "first_seen_at": original_time,
+            "last_seen_at": original_time,
+        })
+
+        activity = await upsert_feed_activity(db, USER_DID, FEED_NAME)
+
+        assert activity.last_seen_at > original_time
+        doc_ref.update.assert_called_once()
+        update_fields = doc_ref.update.call_args[0][0]
+        assert "last_seen_at" in update_fields
+        assert "first_seen_at" not in update_fields
+        doc_ref.set.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_does_not_overwrite_first_seen_at(self):
+        db, doc_ref = _mock_feed_activity_client()
+        original_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        doc_ref.get.return_value = _mock_doc_snapshot(True, {
+            "feed_name": FEED_NAME,
+            "first_seen_at": original_time,
+            "last_seen_at": original_time,
+        })
+
+        activity = await upsert_feed_activity(db, USER_DID, FEED_NAME)
+
+        assert activity.first_seen_at == original_time
