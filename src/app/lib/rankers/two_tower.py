@@ -18,7 +18,7 @@ from ..elasticsearch import fetch_post_embeddings, fetch_recent_liked_post_uris
 logger = logging.getLogger(__name__)
 TWO_TOWER_MODEL_NAME = "two_tower"
 
-def get_inference_settings() -> tuple[str, str, int, int]:
+def get_inference_settings() -> tuple[str, str]:
     """Load inference configuration only when the two-tower ranker is used."""
     base_url = os.environ.get("GE_INFERENCE_BASE_URL", "").rstrip("/")
     if not base_url:
@@ -34,25 +34,7 @@ def get_inference_settings() -> tuple[str, str, int, int]:
             "GE_INFERENCE_API_KEY environment variable is required",
         )
 
-    max_history_len_raw = os.environ.get("GE_INFERENCE_MAX_HISTORY_LEN")
-    if not max_history_len_raw:
-        raise RankerExecutionError(
-            TWO_TOWER_MODEL_NAME,
-            "GE_INFERENCE_MAX_HISTORY_LEN environment variable is required",
-        )
-
-    try:
-        max_history_len = int(max_history_len_raw)
-    except ValueError as exc:
-        raise RankerExecutionError(
-            TWO_TOWER_MODEL_NAME,
-            "GE_INFERENCE_MAX_HISTORY_LEN must be an integer",
-        ) from exc
-
-    # This is hard-coded because we do not expect this to change
-    inference_embed_dim = 384
-
-    return base_url, api_key, max_history_len, inference_embed_dim
+    return base_url, api_key
 
 
 async def predict_post_tower_batch(
@@ -103,7 +85,7 @@ class TwoTowerRanker(Ranker):
         user_did: str,
         candidates: list[CandidatePost]
     ) -> RankerResult:
-        inference_base_url, inference_api_key, inference_max_history_len, inference_embed_dim = (
+        inference_base_url, inference_api_key = (
             get_inference_settings()
         )
         
