@@ -19,7 +19,6 @@ GE_ELASTICSEARCH_URL="INTERNAL_LB_PLACEHOLDER"
 
 # Inference configuration
 GE_INFERENCE_BASE_URL=""
-GE_INFERENCE_MAX_HISTORY_LEN="128"
 
 # Service configuration
 API_INSTANCES_MIN="1"
@@ -74,11 +73,6 @@ validate_config() {
 
     # Set gcloud project
     gcloud config set project "$PROJECT_ID"
-
-    if ! [[ "$GE_INFERENCE_MAX_HISTORY_LEN" =~ ^[0-9]+$ ]]; then
-        log_error "GE_INFERENCE_MAX_HISTORY_LEN must be an integer"
-        exit 1
-    fi
 
     resolve_inference_base_url
 
@@ -242,7 +236,6 @@ deploy_api_service() {
     deploy_cmd="$deploy_cmd --set-env-vars=GE_ELASTICSEARCH_VERIFY_SSL=false"
     deploy_cmd="$deploy_cmd --set-env-vars=GE_FIRESTORE_PROJECT=$PROJECT_ID"
     deploy_cmd="$deploy_cmd --set-env-vars=GE_FIRESTORE_DATABASE=$firestore_database"
-    deploy_cmd="$deploy_cmd --set-env-vars=GE_INFERENCE_MAX_HISTORY_LEN=$GE_INFERENCE_MAX_HISTORY_LEN"
 
     if [ -n "$GE_INFERENCE_BASE_URL" ]; then
         deploy_cmd="$deploy_cmd --set-env-vars=GE_INFERENCE_BASE_URL=$GE_INFERENCE_BASE_URL"
@@ -404,10 +397,6 @@ while [[ $# -gt 0 ]]; do
             GE_ELASTICSEARCH_URL="$2"
             shift 2
             ;;
-        --inference-max-history-len)
-            GE_INFERENCE_MAX_HISTORY_LEN="$2"
-            shift 2
-            ;;
         --min-instances)
             API_INSTANCES_MIN="$2"
             shift 2
@@ -428,8 +417,6 @@ while [[ $# -gt 0 ]]; do
             echo "  --region REGION          GCP region (default: us-east1)"
             echo "  --environment ENV        Environment name (default: stage)"
             echo "  --elasticsearch-url URL  Elasticsearch URL (default: INTERNAL_LB_PLACEHOLDER)"
-            echo "  --inference-max-history-len N"
-            echo "                           Inference history length (default: 128)"
             echo "  --min-instances N        Minimum instances (default: 1)"
             echo "  --max-instances N        Maximum instances (default: 10)"
             echo "  --timeout SECONDS        Cloud Run request timeout (default: 60)"
