@@ -23,7 +23,7 @@ from ..lib.candidates import run_generate
 from ..lib.feed_cache import FeedCache, FirestoreFeedCache, DEFAULT_TTL_SECONDS
 from ..models import CandidateGenerateRequest, FeedCursor, GeneratorSpec
 from ..lib.atproto_auth import verify_auth_header
-from ..lib.firestore import upsert_user
+from ..lib.firestore import upsert_feed_activity, upsert_user
 from ..feeds import FEEDS
 
 logger = logging.getLogger(__name__)
@@ -243,6 +243,12 @@ async def get_feed_skeleton(
         await upsert_user(db, user_did, username)
     except Exception:
         logger.exception("Failed to upsert user '%s' in Firestore", user_did)
+        raise HTTPException(status_code=500, detail="Firestore write failed")
+
+    try:
+        await upsert_feed_activity(db, user_did, feed_name)
+    except Exception:
+        logger.exception("Failed to record feed activity for user '%s', feed '%s'", user_did, feed_name)
         raise HTTPException(status_code=500, detail="Firestore write failed")
 
     feed_cache = _get_feed_cache(request)
