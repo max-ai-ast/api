@@ -21,7 +21,7 @@ import logging
 from ...models import CandidatePost
 from .base import CandidateGenerator, CandidateResult
 from ..elasticsearch import unwrap_es_response
-from ..embeddings import encode_float32_b64
+from ..embeddings import MINILM_L12_EMBEDDING_KEY, encode_float32_b64
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +121,7 @@ async def popularity_search(
         embeddings_obj = src.get("embeddings") or {}
 
         l12 = (
-            embeddings_obj.get("all_MiniLM_L12_v2")
+            embeddings_obj.get(MINILM_L12_EMBEDDING_KEY)
             if isinstance(embeddings_obj, dict)
             else None
         )
