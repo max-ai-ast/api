@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 # How many recent likes to consider when building the query vector.
 DEFAULT_LIKED_POSTS_LIMIT = 50
 
+# Index alias for KNN searches — targets only the last ~1 week of posts for speed.
+POSTS_KNN_INDEX = "posts_recent"
+
 
 def unwrap_es_response(resp) -> dict:
     """Unwrap an Elasticsearch response, handling both ObjectApiResponse and dict.

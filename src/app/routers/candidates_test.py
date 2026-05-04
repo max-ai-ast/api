@@ -47,31 +47,31 @@ def fake_app_es():
                             ]
                         }
                     }
-                # function_score (popularity) or kNN (post_similarity)
-                if isinstance(query, dict) and "function_score" in query:
-                    return {
-                        "hits": {
-                            "hits": [
-                                {
-                                    "_score": 12.5,
-                                    "_source": {
-                                        "at_uri": "at://popular/1",
-                                        "content": "trending post",
-                                        "embeddings": {"all_MiniLM_L12_v2": [0.5, 0.6]},
-                                    },
+                # function_score (popularity or random_posts)
+                return {
+                    "hits": {
+                        "hits": [
+                            {
+                                "_score": 12.5,
+                                "_source": {
+                                    "at_uri": "at://popular/1",
+                                    "content": "trending post",
+                                    "embeddings": {"all_MiniLM_L12_v2": [0.5, 0.6]},
                                 },
-                                {
-                                    "_score": 10.0,
-                                    "_source": {
-                                        "at_uri": "at://popular/2",
-                                        "content": "also trending",
-                                        "embeddings": {},
-                                    },
+                            },
+                            {
+                                "_score": 10.0,
+                                "_source": {
+                                    "at_uri": "at://popular/2",
+                                    "content": "also trending",
+                                    "embeddings": {},
                                 },
-                            ]
-                        }
+                            },
+                        ]
                     }
-                # kNN search result
+                }
+            if index == "posts_recent":
+                # kNN search result (post_similarity)
                 return {
                     "hits": {
                         "hits": [
