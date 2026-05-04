@@ -13,7 +13,10 @@ from .utils import candidate_posts_from_es_response
 # ---------------------------------------------------------------------------
 
 # Maximum number of followed users to use in the query
-MAX_FOLLOWED_USERS = 1000
+MAX_FOLLOWED_USERS = 10_000
+
+# Maximum page size accepted by app.bsky.graph.getFollows.
+FOLLOWS_PAGE_LIMIT = 100
 
 
 # ---------------------------------------------------------------------------
@@ -26,31 +29,45 @@ class FollowedUsersLookupError(Exception):
 
 async def get_followed_user_dids(user_did: str, limit: int) -> list[str]:
     base_url = "https://public.api.bsky.app/xrpc/app.bsky.graph.getFollows"
+    followed_dids: list[str] = []
+    cursor: str | None = None
+
+    if limit <= 0:
+        return followed_dids
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                base_url,
-                params={"actor": user_did, "limit": limit},
-            )
-            resp.raise_for_status()
-            data = resp.json()
+            while len(followed_dids) < limit:
+                page_limit = min(FOLLOWS_PAGE_LIMIT, limit - len(followed_dids))
+                params = {"actor": user_did, "limit": page_limit}
+                if cursor:
+                    params["cursor"] = cursor
+
+                resp = await client.get(base_url, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+
+                follows = data.get("follows", [])
+                if not isinstance(follows, list):
+                    raise FollowedUsersLookupError(
+                        f"Unexpected follows response for {user_did}"
+                    )
+
+                followed_dids.extend(
+                    follow["did"]
+                    for follow in follows
+                    if isinstance(follow, dict) and isinstance(follow.get("did"), str)
+                )
+
+                cursor = data.get("cursor")
+                if not isinstance(cursor, str) or not cursor:
+                    break
     except (httpx.HTTPError, ValueError) as exc:
         raise FollowedUsersLookupError(
             f"Failed to fetch followed users for {user_did}"
         ) from exc
 
-    follows = data.get("follows", [])
-    if not isinstance(follows, list):
-        raise FollowedUsersLookupError(
-            f"Unexpected follows response for {user_did}"
-        )
-
-    return [
-        follow["did"]
-        for follow in follows
-        if isinstance(follow, dict) and isinstance(follow.get("did"), str)
-    ]
+    return followed_dids[:limit]
 
 
 # ---------------------------------------------------------------------------

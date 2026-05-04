@@ -55,6 +55,7 @@ class FakeResponse:
 class FakeAsyncClient:
     instances: list["FakeAsyncClient"] = []
     response = FakeResponse({"follows": []})
+    responses: list[FakeResponse] = []
 
     def __init__(self, *args, **kwargs):
         self.args = args
@@ -71,6 +72,8 @@ class FakeAsyncClient:
 
     async def get(self, url, *, params=None, **kwargs):
         self.get_calls.append({"url": url, "params": params, "kwargs": kwargs})
+        if FakeAsyncClient.responses:
+            return FakeAsyncClient.responses.pop(0)
         return FakeAsyncClient.response
 
 
@@ -78,6 +81,7 @@ class FakeAsyncClient:
 def fake_http_client(monkeypatch):
     FakeAsyncClient.instances = []
     FakeAsyncClient.response = FakeResponse({"follows": []})
+    FakeAsyncClient.responses = []
     monkeypatch.setattr(followed_users_module.httpx, "AsyncClient", FakeAsyncClient)
     return FakeAsyncClient
 
@@ -114,6 +118,65 @@ class TestGetFollowedUserDids:
             "params": {"actor": "did:plc:user1", "limit": 50},
             "kwargs": {},
         }]
+
+    @pytest.mark.asyncio
+    async def test_paginates_follows_with_api_page_limit(self, fake_http_client):
+        first_page = [{"did": f"did:plc:follow{i}"} for i in range(100)]
+        second_page = [
+            {"did": "did:plc:follow100"},
+            {"did": "did:plc:follow101"},
+            {"did": "did:plc:follow102"},
+        ]
+        fake_http_client.responses = [
+            FakeResponse({"follows": first_page, "cursor": "next-page"}),
+            FakeResponse({"follows": second_page}),
+        ]
+
+        dids = await get_followed_user_dids("did:plc:user1", limit=103)
+
+        assert dids == [f"did:plc:follow{i}" for i in range(103)]
+        client = fake_http_client.instances[0]
+        assert client.get_calls == [
+            {
+                "url": "https://public.api.bsky.app/xrpc/app.bsky.graph.getFollows",
+                "params": {"actor": "did:plc:user1", "limit": 100},
+                "kwargs": {},
+            },
+            {
+                "url": "https://public.api.bsky.app/xrpc/app.bsky.graph.getFollows",
+                "params": {
+                    "actor": "did:plc:user1",
+                    "limit": 3,
+                    "cursor": "next-page",
+                },
+                "kwargs": {},
+            },
+        ]
+
+    @pytest.mark.asyncio
+    async def test_caps_returned_dids_at_requested_total_limit(self, fake_http_client):
+        fake_http_client.responses = [
+            FakeResponse({
+                "follows": [
+                    {"did": "did:plc:follow1"},
+                    {"did": "did:plc:follow2"},
+                ],
+                "cursor": "next-page",
+            }),
+        ]
+
+        dids = await get_followed_user_dids("did:plc:user1", limit=1)
+
+        assert dids == ["did:plc:follow1"]
+        client = fake_http_client.instances[0]
+        assert client.get_calls[0]["params"] == {"actor": "did:plc:user1", "limit": 1}
+
+    @pytest.mark.asyncio
+    async def test_non_positive_limit_skips_http_request(self, fake_http_client):
+        dids = await get_followed_user_dids("did:plc:user1", limit=0)
+
+        assert dids == []
+        assert fake_http_client.instances == []
 
     @pytest.mark.asyncio
     async def test_skips_malformed_follow_entries(self, fake_http_client):
