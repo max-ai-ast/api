@@ -3,19 +3,22 @@
 Returns the last N posts from users that the requesting user follows"""
 
 import httpx
+import logging
 
 from ...models import CandidatePost
 from .base import CandidateGenerator, CandidateResult
 from .utils import candidate_posts_from_es_response
 
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
-# Tunables
+# Parameters
 # ---------------------------------------------------------------------------
 
 # Maximum number of followed users to use in the query
 MAX_FOLLOWED_USERS = 10_000
 
-# Maximum page size accepted by app.bsky.graph.getFollows.
+# Maximum page size accepted by app.bsky.graph.getFollows (should not be changed)
 FOLLOWS_PAGE_LIMIT = 100
 
 
