@@ -20,17 +20,37 @@ MAX_FOLLOWED_USERS = 1000
 # Followed users API query
 # ---------------------------------------------------------------------------
 
+class FollowedUsersLookupError(Exception):
+    """Raised when followed-user lookup fails."""
+
+
 async def get_followed_user_dids(user_did: str, limit: int) -> list[str]:
-
     base_url = "https://public.api.bsky.app/xrpc/app.bsky.graph.getFollows"
-    url = f"{base_url}?actor={user_did}&limit={limit}"
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        data = resp.json()
-        follows_list = data.get("follows", [])
-        return [f.get("did") for f in follows_list if "did" in f]
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                base_url,
+                params={"actor": user_did, "limit": limit},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise FollowedUsersLookupError(
+            f"Failed to fetch followed users for {user_did}"
+        ) from exc
+
+    follows = data.get("follows", [])
+    if not isinstance(follows, list):
+        raise FollowedUsersLookupError(
+            f"Unexpected follows response for {user_did}"
+        )
+
+    return [
+        follow["did"]
+        for follow in follows
+        if isinstance(follow, dict) and isinstance(follow.get("did"), str)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -56,9 +76,11 @@ async def followed_users_search(
         must_not.append({"terms": {"at_uri": exclude_uris}})
 
     followed_dids: list[str] = await get_followed_user_dids(
-        user_did, 
+        user_did,
         limit=MAX_FOLLOWED_USERS
     )
+    if not followed_dids:
+        return []
 
     query = {
         "bool": {
@@ -96,7 +118,7 @@ class FollowedUsersCandidateGenerator(CandidateGenerator):
     ) -> CandidateResult:
         candidates = await followed_users_search(
             es,
-            user_did, 
+            user_did,
             num_candidates,
             generator_name=self.name,
             video_only=video_only,
