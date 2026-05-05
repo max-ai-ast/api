@@ -55,7 +55,7 @@ class FakeResponse:
 class FakeAsyncClient:
     instances: list["FakeAsyncClient"] = []
     response = FakeResponse({"follows": []})
-    responses: list[FakeResponse] = []
+    responses: list[FakeResponse | Exception] = []
 
     def __init__(self, *args, **kwargs):
         self.args = args
@@ -73,7 +73,10 @@ class FakeAsyncClient:
     async def get(self, url, *, params=None, **kwargs):
         self.get_calls.append({"url": url, "params": params, "kwargs": kwargs})
         if FakeAsyncClient.responses:
-            return FakeAsyncClient.responses.pop(0)
+            response = FakeAsyncClient.responses.pop(0)
+            if isinstance(response, Exception):
+                raise response
+            return response
         return FakeAsyncClient.response
 
 
@@ -111,7 +114,7 @@ class TestGetFollowedUserDids:
 
         assert dids == ["did:plc:follow1", "did:plc:follow2"]
         client = fake_http_client.instances[0]
-        assert client.kwargs == {"timeout": 10.0}
+        assert client.kwargs == {"timeout": followed_users_module.FOLLOWS_HTTP_TIMEOUT}
         assert client.closed is True
         assert client.get_calls == [{
             "url": "https://public.api.bsky.app/xrpc/app.bsky.graph.getFollows",
@@ -217,6 +220,102 @@ class TestGetFollowedUserDids:
 
         with pytest.raises(FollowedUsersLookupError, match="Failed to fetch"):
             await get_followed_user_dids("did:plc:user1", limit=100)
+
+        client = fake_http_client.instances[0]
+        assert len(client.get_calls) == 2
+
+    @pytest.mark.asyncio
+    async def test_retries_transient_http_error_once(
+        self,
+        fake_http_client,
+        monkeypatch,
+    ):
+        sleeps = []
+
+        async def fake_sleep(delay):
+            sleeps.append(delay)
+
+        monkeypatch.setattr(followed_users_module.asyncio, "sleep", fake_sleep)
+        request = httpx.Request("GET", "https://example.test")
+        response = httpx.Response(429, request=request)
+        fake_http_client.responses = [
+            FakeResponse(
+                status_exc=httpx.HTTPStatusError(
+                    "rate limited",
+                    request=request,
+                    response=response,
+                )
+            ),
+            FakeResponse({"follows": [{"did": "did:plc:follow1"}]}),
+        ]
+
+        dids = await get_followed_user_dids("did:plc:user1", limit=100)
+
+        assert dids == ["did:plc:follow1"]
+        assert sleeps == [followed_users_module.FOLLOWS_RETRY_BACKOFF_SECONDS]
+        client = fake_http_client.instances[0]
+        assert len(client.get_calls) == 2
+
+    @pytest.mark.asyncio
+    async def test_returns_partial_dids_when_later_page_fails(
+        self,
+        fake_http_client,
+        monkeypatch,
+        caplog,
+    ):
+        async def fake_sleep(delay):
+            return None
+
+        monkeypatch.setattr(followed_users_module.asyncio, "sleep", fake_sleep)
+        request = httpx.Request("GET", "https://example.test")
+        response = httpx.Response(503, request=request)
+        first_page = [{"did": f"did:plc:follow{i}"} for i in range(100)]
+        error_page = FakeResponse(
+            status_exc=httpx.HTTPStatusError(
+                "service unavailable",
+                request=request,
+                response=response,
+            )
+        )
+        fake_http_client.responses = [
+            FakeResponse({"follows": first_page, "cursor": "next-page"}),
+            error_page,
+            error_page,
+        ]
+
+        dids = await get_followed_user_dids("did:plc:user1", limit=200)
+
+        assert dids == [f"did:plc:follow{i}" for i in range(100)]
+        assert "partial followed users" in caplog.text
+        client = fake_http_client.instances[0]
+        assert len(client.get_calls) == 3
+
+    @pytest.mark.asyncio
+    async def test_returns_partial_dids_when_total_lookup_budget_expires(
+        self,
+        fake_http_client,
+        monkeypatch,
+        caplog,
+    ):
+        class ExpiringTimeout:
+            def __init__(self, delay):
+                self.delay = delay
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                raise TimeoutError
+
+        monkeypatch.setattr(followed_users_module.asyncio, "timeout", ExpiringTimeout)
+        fake_http_client.response = FakeResponse({
+            "follows": [{"did": "did:plc:follow1"}],
+        })
+
+        dids = await get_followed_user_dids("did:plc:user1", limit=100)
+
+        assert dids == ["did:plc:follow1"]
+        assert "exceeded" in caplog.text
 
     @pytest.mark.asyncio
     async def test_raises_lookup_error_for_invalid_json(self, fake_http_client):
@@ -369,7 +468,7 @@ class TestFollowedUsersSearch:
         assert es.calls == []
 
     @pytest.mark.asyncio
-    async def test_lookup_errors_propagate(self, monkeypatch):
+    async def test_lookup_errors_return_empty_and_skip_es(self, monkeypatch):
         async def fake_get_followed_user_dids(user_did: str, limit: int):
             raise FollowedUsersLookupError("lookup exploded")
 
@@ -380,9 +479,13 @@ class TestFollowedUsersSearch:
         )
         es = FakeEs()
 
-        with pytest.raises(FollowedUsersLookupError, match="lookup exploded"):
-            await followed_users_search(es, "did:plc:user1", num_candidates=10)
+        candidates = await followed_users_search(
+            es,
+            "did:plc:user1",
+            num_candidates=10,
+        )
 
+        assert candidates == []
         assert es.calls == []
 
     @pytest.mark.asyncio
