@@ -38,7 +38,7 @@ FEEDS: dict[str, FeedConfig] = {
         ),
     ),
     "followed-users": FeedConfig(
-        display_name="Followd Usrs",
+        display_name="Following",
         description="Development feed - recent posts from followed users.",
         gen_request_template=CandidateGenerateRequest(
             generators=[GeneratorSpec(name="followed_users", weight=1.0)],
