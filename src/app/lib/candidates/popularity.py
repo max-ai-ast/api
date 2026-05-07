@@ -140,6 +140,7 @@ async def popularity_search(
                 minilm_l12_embedding=encoded,
                 score=hit.get("_score"),
                 generator_name=generator_name,
+                author_did=src.get("author_did"),
             )
         )
     return candidates

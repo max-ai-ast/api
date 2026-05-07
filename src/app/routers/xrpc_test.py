@@ -360,6 +360,22 @@ class TestGetFeedSkeleton:
             data = client.get("/xrpc/app.bsky.feed.getFeedSkeleton", params={"feed": FEED_URI}).json()
         assert data["feed"] == []
 
+    # --- MMR diversification ---
+
+    def test_same_author_candidates_are_spread_in_feed(self):
+        """MMR should interleave candidates from the same author with others."""
+        candidates = [
+            CandidatePost(at_uri="at://alice/1", score=1.0, author_did="did:plc:alice", content=None, minilm_l12_embedding=None, generator_name="g"),
+            CandidatePost(at_uri="at://alice/2", score=0.9, author_did="did:plc:alice", content=None, minilm_l12_embedding=None, generator_name="g"),
+            CandidatePost(at_uri="at://alice/3", score=0.8, author_did="did:plc:alice", content=None, minilm_l12_embedding=None, generator_name="g"),
+            CandidatePost(at_uri="at://bob/1", score=0.5, author_did="did:plc:bob", content=None, minilm_l12_embedding=None, generator_name="g"),
+        ]
+        with self._patch_generators(candidates):
+            data = client.get("/xrpc/app.bsky.feed.getFeedSkeleton", params={"feed": FEED_URI}).json()
+        uris = [item["post"] for item in data["feed"]]
+        assert uris[0] == "at://alice/1"
+        assert uris.index("at://bob/1") < uris.index("at://alice/2")
+
     # --- posts with no at_uri are skipped ---
 
     def test_posts_without_at_uri_are_skipped(self):
