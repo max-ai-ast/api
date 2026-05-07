@@ -6,8 +6,7 @@ from .embeddings import decode_float32_b64
 from ..models import CandidatePost
 
 BETA = 0.5
-AUTHOR_WEIGHT = 1.0
-
+AUTHOR_WEIGHT = 0.75
 
 def mmr_rerank(candidates: list[CandidatePost]) -> list[CandidatePost]:
     if len(candidates) <= 1:
