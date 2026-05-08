@@ -8,7 +8,8 @@ from ..security import verify_api_key
 from pydantic import BaseModel
 from ..models import CandidatePost
 from ..lib.embeddings import encode_float32_b64, decode_float32_b64
-from ..lib.elasticsearch import unwrap_es_response
+from ..lib.elasticsearch import unwrap_es_response, POSTS_KNN_INDEX
+from ..lib.telemetry import timed
 
 router = APIRouter(tags=["skylight"], dependencies=[Depends(verify_api_key)])
 
@@ -189,7 +190,8 @@ async def skylight_similar(request: Request, payload: SkylightSimilarRequest):
     }
 
     try:
-        resp = await request.app.state.es.search(index="posts", query=knn_q, size=payload.size)
+        async with timed(logger, "skylight_similar_knn", index=POSTS_KNN_INDEX, size=payload.size):
+            resp = await request.app.state.es.search(index=POSTS_KNN_INDEX, query=knn_q, size=payload.size)
     except Exception as exc:
         logger.exception("Elasticsearch similar search failed")
         raise HTTPException(status_code=502, detail="Elasticsearch request failed") from exc

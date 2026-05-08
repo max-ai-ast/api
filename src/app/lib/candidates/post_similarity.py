@@ -5,15 +5,16 @@ Generates candidates by finding posts similar to a user's recent likes:
 1. Query the ``likes`` index for the user's most recent liked posts.
 2. Fetch those posts from the ``posts`` index to retrieve MiniLM L12 embeddings.
 3. Average the embeddings into a single query vector.
-4. Run a kNN nearest-neighbours search against the ``posts`` index.
+4. Run a kNN nearest-neighbours search against the ``posts_recent`` index.
 """
 
 import logging
 
 from ...models import CandidatePost
 from .base import CandidateGenerator, CandidateResult
-from ..elasticsearch import unwrap_es_response, fetch_recent_liked_post_uris, fetch_post_embeddings
+from ..elasticsearch import unwrap_es_response, fetch_recent_liked_post_uris, fetch_post_embeddings, POSTS_KNN_INDEX
 from ..embeddings import encode_float32_b64
+from ..telemetry import timed
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ async def knn_search_posts(
     video_only: bool = False,
     exclude_uris: list[str] | None = None,
 ) -> list[CandidatePost]:
-    """Run a kNN search against the ``posts`` index and return candidate posts.
+    """Run a kNN search against the ``posts_recent`` index and return candidate posts.
 
     Uses the ``embeddings.all_MiniLM_L12_v2`` field for nearest-neighbour
     matching.  Each hit is converted to a :class:`CandidatePost` with the ES
@@ -69,7 +70,8 @@ async def knn_search_posts(
         }
     }
 
-    resp = await es.search(index="posts", query=knn_query, size=num_candidates, request_timeout=60)
+    async with timed(logger, "knn_search_posts", index=POSTS_KNN_INDEX, num_candidates=num_candidates):
+        resp = await es.search(index=POSTS_KNN_INDEX, query=knn_query, size=num_candidates, request_timeout=60)
     data = unwrap_es_response(resp)
 
     candidates: list[CandidatePost] = []

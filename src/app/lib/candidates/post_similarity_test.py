@@ -171,7 +171,7 @@ class TestKnnSearchPosts:
     @pytest.mark.asyncio
     async def test_returns_candidates_with_scores(self):
         es = FakeEs(responses={
-            "posts": {
+            "posts_recent": {
                 "hits": {
                     "hits": [
                         {
@@ -197,7 +197,7 @@ class TestKnnSearchPosts:
     @pytest.mark.asyncio
     async def test_passes_generator_name(self):
         es = FakeEs(responses={
-            "posts": {
+            "posts_recent": {
                 "hits": {
                     "hits": [
                         {
@@ -220,7 +220,7 @@ class TestKnnSearchPosts:
     @pytest.mark.asyncio
     async def test_video_only_true_includes_filter(self):
         es = FakeEs(responses={
-            "posts": {"hits": {"hits": []}}
+            "posts_recent": {"hits": {"hits": []}}
         })
         await knn_search_posts(es, [0.1, 0.2], num_candidates=5, video_only=True)
         query = es.calls[0]["query"]
@@ -229,7 +229,7 @@ class TestKnnSearchPosts:
     @pytest.mark.asyncio
     async def test_video_only_false_omits_filter(self):
         es = FakeEs(responses={
-            "posts": {"hits": {"hits": []}}
+            "posts_recent": {"hits": {"hits": []}}
         })
         await knn_search_posts(es, [0.1, 0.2], num_candidates=5, video_only=False)
         query = es.calls[0]["query"]
@@ -261,26 +261,26 @@ class TestPostSimilarityGenerator:
                         }
                     }
                 if index == "posts":
-                    # Check if this is the embedding lookup or the knn search
-                    if isinstance(query, dict) and "terms" in query:
-                        return {
-                            "hits": {
-                                "hits": [
-                                    {
-                                        "_source": {
-                                            "at_uri": "at://post/2",
-                                            "embeddings": {"all_MiniLM_L12_v2": [0.0, 1.0]},
-                                        }
-                                    },
-                                    {
-                                        "_source": {
-                                            "at_uri": "at://post/1",
-                                            "embeddings": {"all_MiniLM_L12_v2": [1.0, 0.0]},
-                                        }
-                                    },
-                                ]
-                            }
+                    # Embedding lookup by URI
+                    return {
+                        "hits": {
+                            "hits": [
+                                {
+                                    "_source": {
+                                        "at_uri": "at://post/2",
+                                        "embeddings": {"all_MiniLM_L12_v2": [0.0, 1.0]},
+                                    }
+                                },
+                                {
+                                    "_source": {
+                                        "at_uri": "at://post/1",
+                                        "embeddings": {"all_MiniLM_L12_v2": [1.0, 0.0]},
+                                    }
+                                },
+                            ]
                         }
+                    }
+                if index == "posts_recent":
                     # kNN search
                     return {
                         "hits": {
