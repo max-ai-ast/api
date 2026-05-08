@@ -3,7 +3,7 @@
 import pytest
 
 from ..models import CandidatePost
-from .diversify import AUTHOR_WEIGHT, _cosine_similarity, _similarity, mmr_rerank
+from .diversify import AUTHOR_WEIGHT, _cosine_similarity, _raw_similarity, _similarity, mmr_rerank
 from .embeddings import encode_float32_b64
 
 
@@ -144,3 +144,51 @@ def test_cosine_similarity_value_matches_manual_calculation():
     b = _post_with_embed("at://b/1", 0.9, "did:plc:bob", vec_b)
     expected = (1 - AUTHOR_WEIGHT) * expected_cosine
     assert _similarity(a, b) == pytest.approx(expected, rel=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# _raw_similarity — same logic as _similarity but accepts pre-decoded vectors
+# ---------------------------------------------------------------------------
+
+def test_raw_similarity_matches_similarity_different_authors_identical_embeddings():
+    vec = [1.0, 0.0]
+    result = _raw_similarity("did:plc:alice", "did:plc:bob", vec, vec)
+    assert result == pytest.approx((1 - AUTHOR_WEIGHT) * 1.0)
+
+
+def test_raw_similarity_matches_similarity_orthogonal_embeddings():
+    result = _raw_similarity("did:plc:alice", "did:plc:bob", [1.0, 0.0], [0.0, 1.0])
+    assert result == pytest.approx(0.0)
+
+
+def test_raw_similarity_same_author_full_score():
+    vec = [1.0, 0.0]
+    result = _raw_similarity("did:plc:alice", "did:plc:alice", vec, vec)
+    expected = AUTHOR_WEIGHT * 1.0 + (1 - AUTHOR_WEIGHT) * 1.0
+    assert result == pytest.approx(expected)
+
+
+def test_raw_similarity_none_vec_skips_cosine():
+    result = _raw_similarity("did:plc:alice", "did:plc:bob", None, [1.0, 0.0])
+    assert result == pytest.approx(0.0)
+
+
+def test_raw_similarity_none_author_no_match():
+    vec = [1.0, 0.0]
+    result = _raw_similarity(None, None, vec, vec)
+    # author_did=None on both — treated as no match; cosine still applies
+    assert result == pytest.approx((1 - AUTHOR_WEIGHT) * 1.0)
+
+
+def test_raw_similarity_agrees_with_similarity_for_same_inputs():
+    """_raw_similarity and _similarity must return the same value for equivalent inputs."""
+    vec_a = [3.0, 4.0]
+    vec_b = [4.0, 3.0]
+    a = _post_with_embed("at://a/1", 1.0, "did:plc:alice", vec_a)
+    b = _post_with_embed("at://b/1", 0.9, "did:plc:bob", vec_b)
+    from .embeddings import decode_float32_b64
+    assert _raw_similarity(
+        a.author_did, b.author_did,
+        decode_float32_b64(a.minilm_l12_embedding),
+        decode_float32_b64(b.minilm_l12_embedding),
+    ) == pytest.approx(_similarity(a, b), rel=1e-6)
