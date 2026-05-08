@@ -14,7 +14,7 @@ from ..lib.embeddings import (
     decode_float32_b64,
     encode_float32_b64,
 )
-from ..lib.elasticsearch import unwrap_es_response
+from ..lib.elasticsearch import POSTS_KNN_INDEX, unwrap_es_response
 from ..lib.telemetry import timed
 
 router = APIRouter(tags=["skylight"], dependencies=[Depends(verify_api_key)])
