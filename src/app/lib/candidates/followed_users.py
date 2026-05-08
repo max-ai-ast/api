@@ -24,7 +24,7 @@ MAX_FOLLOWED_USERS = 1_000
 FOLLOWS_PAGE_LIMIT = 100
 
 # Maximum total time spent paginating followed users for one request
-FOLLOWS_LOOKUP_TIMEOUT_SECONDS = 5.0
+FOLLOWS_LOOKUP_TIMEOUT_SECONDS = 1.0
 
 # Per-request timeout for each app.bsky.graph.getFollows call
 FOLLOWS_HTTP_TIMEOUT = httpx.Timeout(connect=1.0, read=2.0, write=2.0, pool=1.0)
