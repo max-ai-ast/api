@@ -5,15 +5,20 @@ Generates candidates by finding posts similar to a user's recent likes:
 1. Query the ``likes`` index for the user's most recent liked posts.
 2. Fetch those posts from the ``posts`` index to retrieve MiniLM L12 embeddings.
 3. Average the embeddings into a single query vector.
-4. Run a kNN nearest-neighbours search against the ``posts`` index.
+4. Run a kNN nearest-neighbours search against the ``posts_recent`` index.
 """
 
 import logging
 
 from ...models import CandidatePost
 from .base import CandidateGenerator, CandidateResult
-from ..elasticsearch import unwrap_es_response, fetch_recent_liked_post_uris, fetch_post_embeddings
-from ..embeddings import encode_float32_b64
+from ..elasticsearch import unwrap_es_response, fetch_recent_liked_post_uris, fetch_post_embeddings, POSTS_KNN_INDEX
+from ..embeddings import (
+    MINILM_L12_EMBEDDING_FIELD,
+    MINILM_L12_EMBEDDING_KEY,
+    encode_float32_b64,
+)
+from ..telemetry import timed
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +45,10 @@ async def knn_search_posts(
     video_only: bool = False,
     exclude_uris: list[str] | None = None,
 ) -> list[CandidatePost]:
-    """Run a kNN search against the ``posts`` index and return candidate posts.
+    """Run a kNN search against the ``posts_recent`` index and return candidate posts.
 
-    Uses the ``embeddings.all_MiniLM_L12_v2`` field for nearest-neighbour
-    matching.  Each hit is converted to a :class:`CandidatePost` with the ES
-    score attached.
+    Uses the MiniLM L12 embedding field for nearest-neighbour matching. Each
+    hit is converted to a :class:`CandidatePost` with the ES score attached.
     """
     filters: list[dict] = []
     if video_only:
@@ -58,7 +62,7 @@ async def knn_search_posts(
         "bool": {
             "must": {
                 "knn": {
-                    "field": "embeddings.all_MiniLM_L12_v2",
+                    "field": MINILM_L12_EMBEDDING_FIELD,
                     "query_vector": query_vector,
                     "k": num_candidates,
                     "num_candidates": max(100, num_candidates * 10),
@@ -69,7 +73,8 @@ async def knn_search_posts(
         }
     }
 
-    resp = await es.search(index="posts", query=knn_query, size=num_candidates, request_timeout=60)
+    async with timed(logger, "knn_search_posts", index=POSTS_KNN_INDEX, num_candidates=num_candidates):
+        resp = await es.search(index=POSTS_KNN_INDEX, query=knn_query, size=num_candidates, request_timeout=60)
     data = unwrap_es_response(resp)
 
     candidates: list[CandidatePost] = []
@@ -78,7 +83,7 @@ async def knn_search_posts(
         embeddings_obj = src.get("embeddings") or {}
 
         l12 = (
-            embeddings_obj.get("all_MiniLM_L12_v2")
+            embeddings_obj.get(MINILM_L12_EMBEDDING_KEY)
             if isinstance(embeddings_obj, dict)
             else None
         )

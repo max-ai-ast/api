@@ -9,6 +9,7 @@ from ..candidates.post_similarity import (
     fetch_recent_liked_post_uris,
     knn_search_posts,
 )
+from ..embeddings import MINILM_L12_EMBEDDING_KEY
 
 
 # ---------------------------------------------------------------------------
@@ -101,13 +102,13 @@ class TestFetchPostEmbeddings:
                         {
                             "_source": {
                                 "at_uri": "at://2",
-                                "embeddings": {"all_MiniLM_L12_v2": [0.3, 0.4]},
+                                "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.3, 0.4]},
                             }
                         },
                         {
                             "_source": {
                                 "at_uri": "at://1",
-                                "embeddings": {"all_MiniLM_L12_v2": [0.1, 0.2]},
+                                "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.1, 0.2]},
                             }
                         },
                     ]
@@ -136,7 +137,7 @@ class TestFetchPostEmbeddings:
                         {
                             "_source": {
                                 "at_uri": "at://1",
-                                "embeddings": {"all_MiniLM_L12_v2": [0.1, 0.2]},
+                                "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.1, 0.2]},
                             }
                         },
                         {
@@ -171,7 +172,7 @@ class TestKnnSearchPosts:
     @pytest.mark.asyncio
     async def test_returns_candidates_with_scores(self):
         es = FakeEs(responses={
-            "posts": {
+            "posts_recent": {
                 "hits": {
                     "hits": [
                         {
@@ -179,7 +180,7 @@ class TestKnnSearchPosts:
                             "_source": {
                                 "at_uri": "at://post/1",
                                 "content": "hello",
-                                "embeddings": {"all_MiniLM_L12_v2": [0.1, 0.2]},
+                                "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.1, 0.2]},
                             },
                         },
                     ]
@@ -197,7 +198,7 @@ class TestKnnSearchPosts:
     @pytest.mark.asyncio
     async def test_passes_generator_name(self):
         es = FakeEs(responses={
-            "posts": {
+            "posts_recent": {
                 "hits": {
                     "hits": [
                         {
@@ -205,7 +206,7 @@ class TestKnnSearchPosts:
                             "_source": {
                                 "at_uri": "at://post/1",
                                 "content": "hi",
-                                "embeddings": {"all_MiniLM_L12_v2": [0.1, 0.2]},
+                                "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.1, 0.2]},
                             },
                         },
                     ]
@@ -220,7 +221,7 @@ class TestKnnSearchPosts:
     @pytest.mark.asyncio
     async def test_video_only_true_includes_filter(self):
         es = FakeEs(responses={
-            "posts": {"hits": {"hits": []}}
+            "posts_recent": {"hits": {"hits": []}}
         })
         await knn_search_posts(es, [0.1, 0.2], num_candidates=5, video_only=True)
         query = es.calls[0]["query"]
@@ -229,7 +230,7 @@ class TestKnnSearchPosts:
     @pytest.mark.asyncio
     async def test_video_only_false_omits_filter(self):
         es = FakeEs(responses={
-            "posts": {"hits": {"hits": []}}
+            "posts_recent": {"hits": {"hits": []}}
         })
         await knn_search_posts(es, [0.1, 0.2], num_candidates=5, video_only=False)
         query = es.calls[0]["query"]
@@ -269,18 +270,19 @@ class TestPostSimilarityGenerator:
                                     {
                                         "_source": {
                                             "at_uri": "at://post/2",
-                                            "embeddings": {"all_MiniLM_L12_v2": [0.0, 1.0]},
+                                            "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.0, 1.0]},
                                         }
                                     },
                                     {
                                         "_source": {
                                             "at_uri": "at://post/1",
-                                            "embeddings": {"all_MiniLM_L12_v2": [1.0, 0.0]},
+                                            "embeddings": {MINILM_L12_EMBEDDING_KEY: [1.0, 0.0]},
                                         }
                                     },
                                 ]
                             }
                         }
+                if index == "posts_recent":
                     # kNN search
                     return {
                         "hits": {
@@ -290,7 +292,7 @@ class TestPostSimilarityGenerator:
                                     "_source": {
                                         "at_uri": "at://result/1",
                                         "content": "recommended post",
-                                        "embeddings": {"all_MiniLM_L12_v2": [0.5, 0.5]},
+                                        "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.5, 0.5]},
                                     },
                                 }
                             ]
