@@ -61,6 +61,7 @@ def posts_response_to_results(resp) -> list[CandidatePost]:
 
         results.append(
             CandidatePost(
+                author_did=src.get("author_did"),
                 at_uri=src.get("at_uri"),
                 content=src.get("content"),
                 minilm_l12_embedding=encoded,

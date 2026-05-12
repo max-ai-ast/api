@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from ..lib.candidates import run_generate
+from ..lib.diversify import mmr_rerank
 from ..lib.feed_cache import FeedCache, FirestoreFeedCache, DEFAULT_TTL_SECONDS
 from ..models import CandidateGenerateRequest, FeedCursor, GeneratorSpec
 from ..lib.atproto_auth import verify_auth_header
@@ -294,7 +295,9 @@ async def get_feed_skeleton(
                 gen_request, request.app.state.es, swallow_errors=True
             )
 
-            new_uris = [c.at_uri for c in result.candidates if c.at_uri]
+            candidates = sorted(result.candidates, key=lambda c: c.score or 0.0, reverse=True)
+            candidates = mmr_rerank(candidates)
+            new_uris = [c.at_uri for c in candidates if c.at_uri]
             if new_uris:
                 updated = await feed_cache.append(parsed.id, new_uris)
                 if updated is not None:
@@ -325,7 +328,9 @@ async def get_feed_skeleton(
         gen_request, request.app.state.es, swallow_errors=True
     )
 
-    all_uris = [c.at_uri for c in result.candidates if c.at_uri]
+    candidates = sorted(result.candidates, key=lambda c: c.score or 0.0, reverse=True)
+    candidates = mmr_rerank(candidates)
+    all_uris = [c.at_uri for c in candidates if c.at_uri]
 
     # First page to return immediately.
     page = all_uris[:limit]

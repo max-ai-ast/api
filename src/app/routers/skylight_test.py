@@ -79,6 +79,7 @@ def test_search_returns_embedding():
                 "minilm_l12_embedding": expected,
                 "score": 1.5,
                 "generator_name": None,
+                "author_did": None,
             }
         ]
     }
@@ -98,6 +99,7 @@ def test_similar_with_at_uris():
                 "minilm_l12_embedding": expected,
                 "score": 1.5,
                 "generator_name": None,
+                "author_did": None,
             }
         ]
     }
@@ -117,6 +119,7 @@ def test_similar_with_embeddings():
                 "minilm_l12_embedding": expected,
                 "score": 1.5,
                 "generator_name": None,
+                "author_did": None,
             }
         ]
     }

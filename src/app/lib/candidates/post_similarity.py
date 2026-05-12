@@ -102,6 +102,7 @@ async def knn_search_posts(
                 minilm_l12_embedding=encoded,
                 score=hit.get("_score"),
                 generator_name=generator_name,
+                author_did=src.get("author_did"),
             )
         )
     return candidates

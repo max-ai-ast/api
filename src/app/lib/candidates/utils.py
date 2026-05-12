@@ -35,6 +35,7 @@ def candidate_post_from_hit(
             encoded = None
 
     return CandidatePost(
+        author_did=src.get("author_did"),
         at_uri=src.get("at_uri"),
         content=src.get("content"),
         minilm_l12_embedding=encoded,
