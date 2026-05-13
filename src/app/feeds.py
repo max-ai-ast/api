@@ -32,6 +32,7 @@ FEEDS: dict[str, FeedConfig] = {
     "random": FeedConfig(
         display_name="Random",
         description="Development feed — random posts.",
+        diversify=False,
         gen_request_template=CandidateGenerateRequest.model_construct(
             generators=[GeneratorSpec(name="random_posts", weight=1.0)],
             infill=None,

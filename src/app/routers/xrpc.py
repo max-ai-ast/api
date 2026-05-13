@@ -143,7 +143,8 @@ async def _run_ranking_pipeline(
     else:
         ordered = sorted(candidates, key=lambda c: c.score or 0.0, reverse=True)
 
-    return [c.at_uri for c in mmr_rerank(ordered) if c.at_uri]
+    final = mmr_rerank(ordered) if feed_cfg.diversify else ordered
+    return [c.at_uri for c in final if c.at_uri]
 
 
 # ---------------------------------------------------------------------------

@@ -146,6 +146,9 @@ class FeedConfig(BaseModel):
     ``rank_request_template`` optionally holds a ranking spec.  When set,
     candidates are ranked by the named model before URIs are returned.
     Runtime fields (``candidates``, ``user_did``) are filled via ``model_copy``.
+
+    ``diversify`` controls whether MMR reranking is applied after candidate
+    generation and optional model ranking.  Defaults to ``True``.
     """
 
     display_name: str = Field(..., max_length=12)
@@ -155,3 +158,4 @@ class FeedConfig(BaseModel):
         None,
         description="When set, candidates are ranked by this model before being returned.",
     )
+    diversify: bool = Field(True, description="When False, MMR reranking is skipped.")
