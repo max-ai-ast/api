@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from ..lib.candidates import run_generate
+from ..lib.diversify import mmr_rerank
 from ..lib.feed_cache import FeedCache, FirestoreFeedCache, DEFAULT_TTL_SECONDS
 from ..lib.rankers import run_predict
 from ..models import CandidateGenerateRequest, FeedConfig, FeedCursor, GeneratorSpec, RankPredictRequest
@@ -123,18 +124,26 @@ async def _run_ranking_pipeline(
     gen_request: CandidateGenerateRequest,
     es,
 ) -> list[str]:
-    """Generate candidates and optionally rank them, returning AT URIs in order."""
+    """Generate candidates, optionally rank them, then diversify with MMR."""
     result = await run_generate(gen_request, es, swallow_errors=True)
     candidates = result.candidates
 
-    if feed_cfg.rank_request_template is None or not candidates:
-        return [c.at_uri for c in candidates if c.at_uri]
+    if not candidates:
+        return []
 
-    rank_req = feed_cfg.rank_request_template.model_copy(
-        update={"candidates": candidates, "user_did": gen_request.user_did}
-    )
-    rank_result = await run_predict(rank_req, es)
-    return [r.at_uri for r in rank_result.rankings]
+    if feed_cfg.rank_request_template is not None:
+        rank_req = feed_cfg.rank_request_template.model_copy(
+            update={"candidates": candidates, "user_did": gen_request.user_did}
+        )
+        rank_result = await run_predict(rank_req, es)
+        # Reorder CandidatePosts by model rank so MMR diversifies starting
+        # from the highest-ranked items.
+        by_uri = {c.at_uri: c for c in candidates if c.at_uri}
+        ordered = [by_uri[r.at_uri] for r in rank_result.rankings if r.at_uri in by_uri]
+    else:
+        ordered = sorted(candidates, key=lambda c: c.score or 0.0, reverse=True)
+
+    return [c.at_uri for c in mmr_rerank(ordered) if c.at_uri]
 
 
 # ---------------------------------------------------------------------------

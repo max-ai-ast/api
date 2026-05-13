@@ -50,6 +50,9 @@ class CandidatePost(BaseModel):
     generator_name: str | None = Field(
         None, description="Name of the candidate generator that produced this post"
     )
+    author_did: str | None = Field(
+        None, description="AT Protocol DID of the post author"
+    )
 
 
 class GeneratorSpec(BaseModel):
