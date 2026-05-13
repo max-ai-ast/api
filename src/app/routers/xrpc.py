@@ -21,7 +21,8 @@ from pydantic import BaseModel, Field
 
 from ..lib.candidates import run_generate
 from ..lib.feed_cache import FeedCache, FirestoreFeedCache, DEFAULT_TTL_SECONDS
-from ..models import CandidateGenerateRequest, FeedCursor, GeneratorSpec
+from ..lib.rankers import run_predict
+from ..models import CandidateGenerateRequest, FeedConfig, FeedCursor, GeneratorSpec, RankPredictRequest
 from ..lib.atproto_auth import verify_auth_header
 from ..lib.firestore import upsert_feed_activity, upsert_user
 from ..feeds import FEEDS
@@ -110,6 +111,30 @@ class FeedSkeletonResponse(BaseModel):
 
     feed: list[SkeletonItem] = Field(default_factory=list)
     cursor: str | None = Field(default=None, description="Pagination cursor")
+
+
+# ---------------------------------------------------------------------------
+# Feed pipeline
+# ---------------------------------------------------------------------------
+
+
+async def _run_ranking_pipeline(
+    feed_cfg: FeedConfig,
+    gen_request: CandidateGenerateRequest,
+    es,
+) -> list[str]:
+    """Generate candidates and optionally rank them, returning AT URIs in order."""
+    result = await run_generate(gen_request, es, swallow_errors=True)
+    candidates = result.candidates
+
+    if feed_cfg.rank_request_template is None or not candidates:
+        return [c.at_uri for c in candidates if c.at_uri]
+
+    rank_req = feed_cfg.rank_request_template.model_copy(
+        update={"candidates": candidates, "user_did": gen_request.user_did}
+    )
+    rank_result = await run_predict(rank_req, es)
+    return [r.at_uri for r in rank_result.rankings]
 
 
 # ---------------------------------------------------------------------------
@@ -290,11 +315,7 @@ async def get_feed_skeleton(
                 }
             )
 
-            result = await run_generate(
-                gen_request, request.app.state.es, swallow_errors=True
-            )
-
-            new_uris = [c.at_uri for c in result.candidates if c.at_uri]
+            new_uris = await _run_ranking_pipeline(feed_cfg, gen_request, request.app.state.es)
             if new_uris:
                 updated = await feed_cache.append(parsed.id, new_uris)
                 if updated is not None:
@@ -321,11 +342,7 @@ async def get_feed_skeleton(
         update={"user_did": user_did, "num_candidates": batch}
     )
 
-    result = await run_generate(
-        gen_request, request.app.state.es, swallow_errors=True
-    )
-
-    all_uris = [c.at_uri for c in result.candidates if c.at_uri]
+    all_uris = await _run_ranking_pipeline(feed_cfg, gen_request, request.app.state.es)
 
     # First page to return immediately.
     page = all_uris[:limit]

@@ -11,7 +11,7 @@ the codebase (e.g.  the ``publish_feed.py`` script) can import it without
 pulling in FastAPI.
 """
 
-from .models import CandidateGenerateRequest, FeedConfig, GeneratorSpec
+from .models import CandidateGenerateRequest, FeedConfig, GeneratorSpec, RankPredictRequest
 
 # NOTE: display_name is limited to 24 chars, including the prefix ("GreenEarth, GE Dev, or GE Stg")
 FEEDS: dict[str, FeedConfig] = {
@@ -35,6 +35,22 @@ FEEDS: dict[str, FeedConfig] = {
             user_did="",
             num_candidates=30,
             video_only=False,
+        ),
+    ),
+    "ranked-similarity": FeedConfig(
+        display_name="Ranked",
+        description="Post-similarity candidates ranked by the two-tower model.",
+        gen_request_template=CandidateGenerateRequest(
+            generators=[GeneratorSpec(name="post_similarity", weight=1.0)],
+            infill="popularity",
+            user_did="",
+            num_candidates=30,
+            video_only=False,
+        ),
+        rank_request_template=RankPredictRequest(
+            model="two_tower",
+            user_did="",
+            candidates=[],
         ),
     ),
 }

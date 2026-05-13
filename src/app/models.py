@@ -104,7 +104,6 @@ class RankPredictRequest(BaseModel):
 
     candidates: list[CandidatePost] = Field(
         ...,
-        min_length=1,
         description="Candidates to rank in the same shape returned by /candidates/generate",
     )
     model: str | None = Field(
@@ -140,8 +139,16 @@ class FeedConfig(BaseModel):
     ``gen_request_template`` holds the generator pipeline spec using the same
     shape as ``CandidateGenerateRequest``.  Session-specific fields
     (``user_did``, ``num_candidates``) are filled in at request time.
+
+    ``rank_request_template`` optionally holds a ranking spec.  When set,
+    candidates are ranked by the named model before URIs are returned.
+    Runtime fields (``candidates``, ``user_did``) are filled via ``model_copy``.
     """
 
     display_name: str = Field(..., max_length=12)
     description: str = ""
     gen_request_template: CandidateGenerateRequest
+    rank_request_template: RankPredictRequest | None = Field(
+        None,
+        description="When set, candidates are ranked by this model before being returned.",
+    )
