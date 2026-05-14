@@ -123,6 +123,7 @@ class TwoTowerRanker(Ranker):
         output_user_embedding = output_user_embedding_list[0]
 
         ####### CANDIATE POSTS #######
+        valid_candidates = [candidate for candidate in candidates if candidate.at_uri is not None]
         candidates_by_uri = {candidate.at_uri: candidate for candidate in candidates if candidate.at_uri is not None}
         
         # Get the embeddings for all the posts
@@ -133,7 +134,16 @@ class TwoTowerRanker(Ranker):
                 len(candidates_by_uri),
                 user_did,
             )
-            return RankerResult(model=self.name, result=RankPredictResult(rankings=[]))
+            rankings = [
+                RankedCandidate(
+                    at_uri=candidate.at_uri,
+                    rank=rank_idx,
+                    rank_score=None,
+                )
+                for rank_idx, candidate in enumerate(valid_candidates, start=1)
+                if candidate.at_uri is not None
+            ]
+            return RankerResult(model=self.name, result=RankPredictResult(rankings=rankings))
 
         ranked_candidates_input = [
             candidates_by_uri[at_uri]
@@ -185,6 +195,18 @@ class TwoTowerRanker(Ranker):
                     at_uri=candidate.at_uri,
                     rank=rank_idx,
                     rank_score=score,
+                )
+            )
+
+        ranked_uris = {ranking.at_uri for ranking in rankings}
+        for candidate in valid_candidates:
+            if candidate.at_uri is None or candidate.at_uri in ranked_uris:
+                continue
+            rankings.append(
+                RankedCandidate(
+                    at_uri=candidate.at_uri,
+                    rank=len(rankings) + 1,
+                    rank_score=None,
                 )
             )
 
