@@ -91,24 +91,23 @@ class TwoTowerRanker(Ranker):
         
         ####### USER #######
         # 1. Get recently liked post URIs
+        user_history_vectors = []
         user_history_liked_uris = await fetch_recent_liked_post_uris(es, user_did)
 
         if not user_history_liked_uris:
             logger.info("No likes found for user %s", user_did)
-            return RankerResult(model=self.name, result=RankPredictResult(rankings=[]))
+        else:
+            # 2. Fetch embeddings for those posts
+            user_history_embedding_pairs: list[tuple[str, list[float]]] = await fetch_post_embeddings(es, user_history_liked_uris)
 
-        # 2. Fetch embeddings for those posts
-        user_history_embedding_pairs = await fetch_post_embeddings(es, user_history_liked_uris)
-
-        if not user_history_embedding_pairs:
-            logger.info(
-                "No embeddings found for %d liked posts of user %s",
-                len(user_history_liked_uris),
-                user_did,
-            )
-            return RankerResult(model=self.name, result=RankPredictResult(rankings=[]))
-
-        user_history_vectors = [embedding for _, embedding in user_history_embedding_pairs]
+            if not user_history_embedding_pairs:
+                logger.info(
+                    "No embeddings found for %d liked posts of user %s",
+                    len(user_history_liked_uris),
+                    user_did,
+                )
+            else:
+                user_history_vectors = [embedding for _, embedding in user_history_embedding_pairs]
         
         # Call the inference API for the user tower
         output_user_embedding_list = await predict_user_tower_single(
