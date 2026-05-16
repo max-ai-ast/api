@@ -13,6 +13,7 @@ import httpx
 from ...models import RankedCandidate, CandidatePost, RankPredictResult
 from .base import Ranker, RankerExecutionError, RankerResult
 from ..elasticsearch import fetch_post_embeddings, fetch_recent_liked_post_uris
+from ..embeddings import decode_float32_b64
 
 
 logger = logging.getLogger(__name__)
@@ -138,9 +139,24 @@ class TwoTowerRanker(Ranker):
         ####### CANDIATE POSTS #######
         valid_candidates = [candidate for candidate in candidates if candidate.at_uri is not None]
         candidates_by_uri = {candidate.at_uri: candidate for candidate in candidates if candidate.at_uri is not None}
-        
-        # Get the embeddings for all the posts
-        candidate_embedding_pairs = await fetch_post_embeddings(es, list(candidates_by_uri))
+
+        # Use embeddings already carried on CandidatePost when available (avoids an ES round-trip).
+        candidate_embedding_pairs: list[tuple[str, list[float]]] = []
+        missing_uris: list[str] = []
+        for uri, candidate in candidates_by_uri.items():
+            if candidate.minilm_l12_embedding:
+                try:
+                    vec = decode_float32_b64(candidate.minilm_l12_embedding)
+                    candidate_embedding_pairs.append((uri, vec))
+                    continue
+                except Exception:
+                    pass
+            missing_uris.append(uri)
+
+        if missing_uris:
+            fetched = await fetch_post_embeddings(es, missing_uris)
+            candidate_embedding_pairs.extend(fetched)
+
         if not candidate_embedding_pairs:
             logger.info(
                 "No embeddings found for %d candidate posts of user %s",
