@@ -32,6 +32,9 @@ async def run_predict(
     if ranker is None:
         raise RankModelNotFoundError(model_name)
 
+    if not request.candidates:
+        raise RankerError("candidates list must not be empty")
+
     if any(candidate.at_uri is None for candidate in request.candidates):
         raise RankerError("All candidates must include at_uri")
 

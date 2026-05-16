@@ -13,6 +13,7 @@ import httpx
 from ...models import RankedCandidate, CandidatePost, RankPredictResult
 from .base import Ranker, RankerExecutionError, RankerResult
 from ..elasticsearch import fetch_post_embeddings, fetch_recent_liked_post_uris
+from ..embeddings import decode_float32_b64
 
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,9 @@ def get_inference_settings() -> tuple[str, str]:
     return base_url, api_key
 
 
+POST_TOWER_BATCH_SIZE = 32
+
+
 async def predict_post_tower_batch(
     post_embeddings: list[list[float]],
     *,
@@ -45,13 +49,23 @@ async def predict_post_tower_batch(
 ) -> list[list[float]]:
     url = f"{base_url}/models/post-tower/predict"
     headers = {"X-API-Key": api_key}
-    payload = {"post_embeddings": post_embeddings}
 
+    results: list[list[float]] = []
     async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(url, json=payload, headers=headers) # type: ignore
-        resp.raise_for_status()
-        data = resp.json()
-        return data["outputs"]
+        for i in range(0, len(post_embeddings), POST_TOWER_BATCH_SIZE):
+            chunk = post_embeddings[i : i + POST_TOWER_BATCH_SIZE]
+            payload = {"post_embeddings": chunk}
+            resp = await client.post(url, json=payload, headers=headers) # type: ignore
+            if resp.is_error:
+                logger.error(
+                    "post-tower predict failed status=%s body=%s",
+                    resp.status_code,
+                    resp.text,
+                )
+                resp.raise_for_status()
+            data = resp.json()
+            results.extend(data["outputs"])
+    return results
 
 
 async def predict_user_tower_single(
@@ -125,9 +139,24 @@ class TwoTowerRanker(Ranker):
         ####### CANDIATE POSTS #######
         valid_candidates = [candidate for candidate in candidates if candidate.at_uri is not None]
         candidates_by_uri = {candidate.at_uri: candidate for candidate in candidates if candidate.at_uri is not None}
-        
-        # Get the embeddings for all the posts
-        candidate_embedding_pairs = await fetch_post_embeddings(es, list(candidates_by_uri))
+
+        # Use embeddings already carried on CandidatePost when available (avoids an ES round-trip).
+        candidate_embedding_pairs: list[tuple[str, list[float]]] = []
+        missing_uris: list[str] = []
+        for uri, candidate in candidates_by_uri.items():
+            if candidate.minilm_l12_embedding:
+                try:
+                    vec = decode_float32_b64(candidate.minilm_l12_embedding)
+                    candidate_embedding_pairs.append((uri, vec))
+                    continue
+                except Exception:
+                    pass
+            missing_uris.append(uri)
+
+        if missing_uris:
+            fetched = await fetch_post_embeddings(es, missing_uris)
+            candidate_embedding_pairs.extend(fetched)
+
         if not candidate_embedding_pairs:
             logger.info(
                 "No embeddings found for %d candidate posts of user %s",

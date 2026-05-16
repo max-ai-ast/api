@@ -22,7 +22,8 @@ from pydantic import BaseModel, Field
 from ..lib.candidates import run_generate
 from ..lib.diversify import mmr_rerank
 from ..lib.feed_cache import FeedCache, FirestoreFeedCache, DEFAULT_TTL_SECONDS
-from ..models import CandidateGenerateRequest, FeedCursor, GeneratorSpec
+from ..lib.rankers import run_predict
+from ..models import CandidateGenerateRequest, FeedConfig, FeedCursor, GeneratorSpec, RankPredictRequest
 from ..lib.atproto_auth import verify_auth_header
 from ..lib.firestore import upsert_feed_activity, upsert_user
 from ..feeds import FEEDS
@@ -111,6 +112,39 @@ class FeedSkeletonResponse(BaseModel):
 
     feed: list[SkeletonItem] = Field(default_factory=list)
     cursor: str | None = Field(default=None, description="Pagination cursor")
+
+
+# ---------------------------------------------------------------------------
+# Feed pipeline
+# ---------------------------------------------------------------------------
+
+
+async def _run_ranking_pipeline(
+    feed_cfg: FeedConfig,
+    gen_request: CandidateGenerateRequest,
+    es,
+) -> list[str]:
+    """Generate candidates, optionally rank them, then diversify with MMR."""
+    result = await run_generate(gen_request, es, swallow_errors=True)
+    candidates = result.candidates
+
+    if not candidates:
+        return []
+
+    if feed_cfg.rank_request_template is not None:
+        rank_req = feed_cfg.rank_request_template.model_copy(
+            update={"candidates": candidates, "user_did": gen_request.user_did}
+        )
+        rank_result = await run_predict(rank_req, es)
+        # Reorder CandidatePosts by model rank so MMR diversifies starting
+        # from the highest-ranked items.
+        by_uri = {c.at_uri: c for c in candidates if c.at_uri}
+        ordered = [by_uri[r.at_uri] for r in rank_result.rankings if r.at_uri in by_uri]
+    else:
+        ordered = sorted(candidates, key=lambda c: c.score or 0.0, reverse=True)
+
+    final = mmr_rerank(ordered) if feed_cfg.diversify else ordered
+    return [c.at_uri for c in final if c.at_uri]
 
 
 # ---------------------------------------------------------------------------
@@ -291,13 +325,7 @@ async def get_feed_skeleton(
                 }
             )
 
-            result = await run_generate(
-                gen_request, request.app.state.es, swallow_errors=True
-            )
-
-            candidates = sorted(result.candidates, key=lambda c: c.score or 0.0, reverse=True)
-            candidates = mmr_rerank(candidates)
-            new_uris = [c.at_uri for c in candidates if c.at_uri]
+            new_uris = await _run_ranking_pipeline(feed_cfg, gen_request, request.app.state.es)
             if new_uris:
                 updated = await feed_cache.append(parsed.id, new_uris)
                 if updated is not None:
@@ -324,13 +352,7 @@ async def get_feed_skeleton(
         update={"user_did": user_did, "num_candidates": batch}
     )
 
-    result = await run_generate(
-        gen_request, request.app.state.es, swallow_errors=True
-    )
-
-    candidates = sorted(result.candidates, key=lambda c: c.score or 0.0, reverse=True)
-    candidates = mmr_rerank(candidates)
-    all_uris = [c.at_uri for c in candidates if c.at_uri]
+    all_uris = await _run_ranking_pipeline(feed_cfg, gen_request, request.app.state.es)
 
     # First page to return immediately.
     page = all_uris[:limit]
