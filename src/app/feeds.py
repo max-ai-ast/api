@@ -63,7 +63,7 @@ FEEDS: dict[str, FeedConfig] = {
         description="The best posts from people you follow, curated just for you.",
         gen_request_template=CandidateGenerateRequest.model_construct(
             generators=[GeneratorSpec(name="followed_users", weight=1.0)],
-            infill="popularity",
+            infill=None,
             num_candidates=30,
             video_only=False,
             exclude_uris=[],

@@ -1172,13 +1172,9 @@ class TestBestOfFriendsFeed:
         primary_gen.generate.return_value = CandidateResult(
             generator_name="followed_users", candidates=candidates
         )
-        infill_gen = AsyncMock()
-        infill_gen.generate.return_value = CandidateResult(
-            generator_name="popularity", candidates=[]
-        )
 
         def fake_get(name):
-            return {"followed_users": primary_gen, "popularity": infill_gen}.get(name)
+            return {"followed_users": primary_gen}.get(name)
 
         return patch("app.lib.candidates.generate.get_generator", side_effect=fake_get)
 
