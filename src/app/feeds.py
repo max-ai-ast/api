@@ -34,10 +34,7 @@ FEEDS: dict[str, FeedConfig] = {
         description="Development feed — random posts.",
         diversify=False,
         gen_request_template=CandidateGenerateRequest.model_construct(
-            generators=[
-                GeneratorSpec(name="post_similarity", weight=0.5),
-                GeneratorSpec(name="followed_users", weight=0.5),
-            ],
+            generators=[GeneratorSpec(name="random_posts", weight=1.0)],
             infill=None,
             num_candidates=30,
             video_only=False,
@@ -48,7 +45,10 @@ FEEDS: dict[str, FeedConfig] = {
         display_name="Ranked",
         description="Current-best ranked feed.",
         gen_request_template=CandidateGenerateRequest.model_construct(
-            generators=[GeneratorSpec(name="post_similarity", weight=1.0)],
+            generators=[
+                GeneratorSpec(name="post_similarity", weight=0.5),
+                GeneratorSpec(name="followed_users", weight=0.5),
+            ],
             infill="popularity",
             num_candidates=30,
             video_only=False,
