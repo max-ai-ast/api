@@ -1066,13 +1066,21 @@ class TestRankedFeed:
         primary_gen.generate.return_value = CandidateResult(
             generator_name="post_similarity", candidates=candidates
         )
+        followed_gen = AsyncMock()
+        followed_gen.generate.return_value = CandidateResult(
+            generator_name="followed_users", candidates=[]
+        )
         infill_gen = AsyncMock()
         infill_gen.generate.return_value = CandidateResult(
             generator_name="popularity", candidates=[]
         )
 
         def fake_get(name):
-            return {"post_similarity": primary_gen, "popularity": infill_gen}.get(name)
+            return {
+                "post_similarity": primary_gen,
+                "followed_users": followed_gen,
+                "popularity": infill_gen,
+            }.get(name)
 
         return patch("app.lib.candidates.generate.get_generator", side_effect=fake_get)
 
@@ -1094,6 +1102,37 @@ class TestRankedFeed:
             ).json()
 
         posts = [item["post"] for item in data["feed"]]
+        assert posts == ["at://p/2", "at://p/1", "at://p/0"]
+
+    def test_mmr_uses_rank_score_not_generator_score(self):
+        """MMR should weight by the model's rank_score, not the generator's ES score.
+
+        Candidates are given generator scores that disagree with the ranker's
+        ordering.  With no embeddings, MMR picks purely by relevance score, so
+        the output order reveals which score is used.
+        """
+        # Generator scores: p/0 highest, p/1 middle, p/2 lowest.
+        candidates = [
+            CandidatePost(at_uri="at://p/0", score=3.0, content=None, minilm_l12_embedding=None, generator_name="g"),
+            CandidatePost(at_uri="at://p/1", score=2.0, content=None, minilm_l12_embedding=None, generator_name="g"),
+            CandidatePost(at_uri="at://p/2", score=1.0, content=None, minilm_l12_embedding=None, generator_name="g"),
+        ]
+        # Ranker reverses the order: p/2 best, p/1 middle, p/0 worst.
+        rank_result = RankPredictResult(rankings=[
+            RankedCandidate(at_uri="at://p/2", rank=1, rank_score=3.0),
+            RankedCandidate(at_uri="at://p/1", rank=2, rank_score=2.0),
+            RankedCandidate(at_uri="at://p/0", rank=3, rank_score=1.0),
+        ])
+
+        with self._patch_generators(candidates), \
+             patch("app.routers.xrpc.run_predict", new_callable=AsyncMock, return_value=rank_result):
+            data = client.get(
+                "/xrpc/app.bsky.feed.getFeedSkeleton",
+                params={"feed": RANKED_FEED_URI},
+            ).json()
+
+        posts = [item["post"] for item in data["feed"]]
+        # Should follow rank_score order (p/2 first), not generator score (p/0 first).
         assert posts == ["at://p/2", "at://p/1", "at://p/0"]
 
     def test_ranking_failure_returns_500(self):
