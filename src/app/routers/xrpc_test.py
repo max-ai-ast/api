@@ -1059,13 +1059,21 @@ class TestRankedFeed:
         primary_gen.generate.return_value = CandidateResult(
             generator_name="post_similarity", candidates=candidates
         )
+        followed_gen = AsyncMock()
+        followed_gen.generate.return_value = CandidateResult(
+            generator_name="followed_users", candidates=[]
+        )
         infill_gen = AsyncMock()
         infill_gen.generate.return_value = CandidateResult(
             generator_name="popularity", candidates=[]
         )
 
         def fake_get(name):
-            return {"post_similarity": primary_gen, "popularity": infill_gen}.get(name)
+            return {
+                "post_similarity": primary_gen,
+                "followed_users": followed_gen,
+                "popularity": infill_gen,
+            }.get(name)
 
         return patch("app.lib.candidates.generate.get_generator", side_effect=fake_get)
 
