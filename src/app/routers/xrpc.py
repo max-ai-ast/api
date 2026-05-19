@@ -136,10 +136,14 @@ async def _run_ranking_pipeline(
             update={"candidates": candidates, "user_did": gen_request.user_did}
         )
         rank_result = await run_predict(rank_req, es)
-        # Reorder CandidatePosts by model rank so MMR diversifies starting
-        # from the highest-ranked items.
+        # Reorder CandidatePosts by model rank and stamp rank_score onto each
+        # so MMR uses the model's relevance scores, not the generator scores.
         by_uri = {c.at_uri: c for c in candidates if c.at_uri}
-        ordered = [by_uri[r.at_uri] for r in rank_result.rankings if r.at_uri in by_uri]
+        ordered = [
+            by_uri[r.at_uri].model_copy(update={"score": r.rank_score})
+            for r in rank_result.rankings
+            if r.at_uri in by_uri
+        ]
     else:
         ordered = sorted(candidates, key=lambda c: c.score or 0.0, reverse=True)
 
