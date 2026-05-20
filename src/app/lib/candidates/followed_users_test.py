@@ -407,6 +407,7 @@ class TestFollowedUsersSearch:
                 "filter": [
                     {"terms": {"author_did": ["did:plc:follow1", "did:plc:follow2"]}},
                 ],
+                "must_not": [{"exists": {"field": "thread_parent_post"}}],
             }
         }
 
@@ -445,6 +446,7 @@ class TestFollowedUsersSearch:
 
         query = es.calls[0]["query"]
         assert query["bool"]["must_not"] == [
+            {"exists": {"field": "thread_parent_post"}},
             {"terms": {"at_uri": ["at://post/1", "at://post/2"]}},
         ]
 
@@ -455,7 +457,9 @@ class TestFollowedUsersSearch:
 
         await followed_users_search(es, "did:plc:user1", num_candidates=10)
 
-        assert "must_not" not in es.calls[0]["query"]["bool"]
+        assert es.calls[0]["query"]["bool"]["must_not"] == [
+            {"exists": {"field": "thread_parent_post"}},
+        ]
 
     @pytest.mark.asyncio
     async def test_returns_empty_and_skips_es_when_no_followed_users(self, monkeypatch):
