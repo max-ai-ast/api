@@ -1,4 +1,16 @@
-"""Candidate generator for posts that followed users have liked"""
+"""Candidate generator for posts that followed users have liked.
+
+The likes index and posts index are not perfectly aligned: a recent like can
+point at a post that is missing from our posts index, filtered out, a reply, or
+otherwise unavailable as a candidate. To avoid guessing one fixed number of
+liked URIs up front, this generator pages through recent likes with
+``search_after`` until it has enough matching posts or reaches a hard scan cap.
+
+As pages are scanned, repeated likes for the same post are deduplicated before
+querying the posts index, but the repeated like count is retained and used as
+the candidate score. Final ordering is by like count descending, with
+last-seen like recency as the tie-breaker.
+"""
 
 import logging
 from dataclasses import dataclass
