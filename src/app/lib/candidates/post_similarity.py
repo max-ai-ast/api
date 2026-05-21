@@ -12,7 +12,7 @@ import logging
 
 from ...models import CandidatePost
 from .base import CandidateGenerator, CandidateResult
-from ..elasticsearch import unwrap_es_response, fetch_recent_liked_post_uris, fetch_post_embeddings, POSTS_KNN_INDEX
+from ..elasticsearch import fetch_recent_liked_post_uris, fetch_post_embeddings, POSTS_KNN_INDEX
 from ..embeddings import (
     MINILM_L12_EMBEDDING_FIELD,
 )

@@ -47,7 +47,7 @@ async def fetch_recent_liked_post_uris(
     """
     if isinstance(user_dids, str):
         user_dids = [user_dids]
-    
+
     if not user_dids:
         return []
 
