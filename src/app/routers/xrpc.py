@@ -26,6 +26,7 @@ from ..lib.rankers import run_predict
 from ..models import CandidateGenerateRequest, FeedConfig, FeedCursor, GeneratorSpec, RankPredictRequest
 from ..lib.atproto_auth import verify_auth_header
 from ..lib.firestore import upsert_feed_activity, upsert_user
+from ..lib.request_cache import request_cache_scope
 from ..feeds import FEEDS
 
 logger = logging.getLogger(__name__)
@@ -124,31 +125,38 @@ async def _run_ranking_pipeline(
     gen_request: CandidateGenerateRequest,
     es,
 ) -> list[str]:
-    """Generate candidates, optionally rank them, then diversify with MMR."""
-    result = await run_generate(gen_request, es, swallow_errors=True)
-    candidates = result.candidates
+    """Generate candidates, optionally rank them, then diversify with MMR.
 
-    if not candidates:
-        return []
+    Runs inside a per-request cache scope so that identical ES queries
+    issued by different stages (e.g. ``fetch_recent_liked_post_uris`` in
+    both ``post_similarity`` and the two-tower ranker) collapse to a
+    single round-trip.
+    """
+    async with request_cache_scope():
+        result = await run_generate(gen_request, es, swallow_errors=True)
+        candidates = result.candidates
 
-    if feed_cfg.rank_request_template is not None:
-        rank_req = feed_cfg.rank_request_template.model_copy(
-            update={"candidates": candidates, "user_did": gen_request.user_did}
-        )
-        rank_result = await run_predict(rank_req, es)
-        # Reorder CandidatePosts by model rank and stamp rank_score onto each
-        # so MMR uses the model's relevance scores, not the generator scores.
-        by_uri = {c.at_uri: c for c in candidates if c.at_uri}
-        ordered = [
-            by_uri[r.at_uri].model_copy(update={"score": r.rank_score})
-            for r in rank_result.rankings
-            if r.at_uri in by_uri
-        ]
-    else:
-        ordered = sorted(candidates, key=lambda c: c.score or 0.0, reverse=True)
+        if not candidates:
+            return []
 
-    final = mmr_rerank(ordered) if feed_cfg.diversify else ordered
-    return [c.at_uri for c in final if c.at_uri]
+        if feed_cfg.rank_request_template is not None:
+            rank_req = feed_cfg.rank_request_template.model_copy(
+                update={"candidates": candidates, "user_did": gen_request.user_did}
+            )
+            rank_result = await run_predict(rank_req, es)
+            # Reorder CandidatePosts by model rank and stamp rank_score onto each
+            # so MMR uses the model's relevance scores, not the generator scores.
+            by_uri = {c.at_uri: c for c in candidates if c.at_uri}
+            ordered = [
+                by_uri[r.at_uri].model_copy(update={"score": r.rank_score})
+                for r in rank_result.rankings
+                if r.at_uri in by_uri
+            ]
+        else:
+            ordered = sorted(candidates, key=lambda c: c.score or 0.0, reverse=True)
+
+        final = mmr_rerank(ordered) if feed_cfg.diversify else ordered
+        return [c.at_uri for c in final if c.at_uri]
 
 
 # ---------------------------------------------------------------------------
