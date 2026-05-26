@@ -45,8 +45,10 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import hashlib
 import os
 import sys
+from typing import Literal
 
 import httpx
 from dotenv import load_dotenv
@@ -71,6 +73,22 @@ ENV_ALIASES: dict[str, str] = {
     "prod": "prod",
     "production": "prod",
 }
+
+
+def _acronym(display_name: str) -> str:
+    return "".join(word[0].upper() for word in display_name.split())
+
+
+def _stable_hash(s: str) -> str:
+    return hashlib.sha256(s.encode()).hexdigest()[:2]
+
+
+def _caterpie_display_name(display_name: str) -> str:
+    return f"{_stable_hash(display_name)} {_acronym(display_name)}"
+
+
+def _caterpie_rkey(display_name: str) -> str:
+    return f"{_stable_hash(display_name)}-{_acronym(display_name).lower()}"
 
 
 def _normalize_environment(environment: str | None) -> str | None:
@@ -361,51 +379,78 @@ def list_feeds(
             print()
 
 
+def _resolve_feed_publish_params(
+    rkey: str,
+    feed_cfg,
+    normalized_env: str | None,
+) -> tuple[str, str, str]:
+    """Return (published_rkey, display_name, description) for a feed based on routing rules."""
+    is_greenearth = normalized_env == "prod" and feed_cfg.public
+    if is_greenearth:
+        return rkey, feed_cfg.display_name, f"{feed_cfg.description} | GreenEarth"
+    caterpie_name = _caterpie_display_name(feed_cfg.display_name)
+    published_rkey = _caterpie_rkey(feed_cfg.display_name)
+    if normalized_env in ("dev", "stage"):
+        published_display_name = f"GE {caterpie_name}"
+    else:
+        published_display_name = caterpie_name
+    return published_rkey, published_display_name, "Built by Caterpie"
+
+
 def sync_feeds(
     *,
     handle: str,
     password: str,
     generator_did: str,
     environment: str | None = None,
+    visibility: Literal["public", "internal"] | None = None,
     pds: str = DEFAULT_PDS,
 ) -> None:
     """Sync published feed records with the FEEDS config.
 
-    Creates or updates a record for every feed in ``FEEDS`` and deletes any
-    existing records whose rkey is *not* present in ``FEEDS``.  Because
-    ``putRecord`` is an upsert, feeds that already exist are updated in place
-    without a visible gap.
+    Creates or updates a record for every feed in ``FEEDS`` (filtered by
+    *visibility* when set) and deletes any existing records whose rkey is
+    *not* in the desired set.  Because ``putRecord`` is an upsert, feeds that
+    already exist are updated in place without a visible gap.
     """
-    if not FEEDS:
+    feed_items = list(FEEDS.items())
+    if visibility == "public":
+        feed_items = [(k, v) for k, v in feed_items if v.public]
+    elif visibility == "internal":
+        feed_items = [(k, v) for k, v in feed_items if not v.public]
+
+    if not feed_items:
         print("No feeds configured in FEEDS.", file=sys.stderr)
         sys.exit(1)
+
+    normalized_env = _normalize_environment(environment)
 
     with httpx.Client(timeout=30) as client:
         session = _create_session(client, pds, handle, password)
         access_jwt = session["accessJwt"]
         repo_did = session["did"]
 
-        # Discover existing records
         existing_records = _list_records(client, pds, access_jwt, repo_did)
         existing_rkeys = {r["uri"].split("/")[-1] for r in existing_records}
-        desired_rkeys = set(FEEDS.keys())
 
         from datetime import datetime, timezone
 
-        # Publish / update every feed in FEEDS
-        for rkey, feed_cfg in FEEDS.items():
-            display_name = _prefixed_display_name(feed_cfg.display_name, environment)
+        desired_rkeys: set[str] = set()
+        for rkey, feed_cfg in feed_items:
+            published_rkey, display_name, description = _resolve_feed_publish_params(
+                rkey, feed_cfg, normalized_env
+            )
+            desired_rkeys.add(published_rkey)
             record: dict = {
                 "$type": "app.bsky.feed.generator",
                 "did": generator_did,
                 "displayName": display_name,
-                "description": feed_cfg.description,
+                "description": description,
                 "createdAt": datetime.now(timezone.utc).isoformat(),
             }
-            _put_record(client, pds, access_jwt, repo_did, rkey, record)
+            _put_record(client, pds, access_jwt, repo_did, published_rkey, record)
             print(f"  Published: {rkey} ({display_name})")
 
-        # Remove stale records not in FEEDS
         stale = existing_rkeys - desired_rkeys
         for rkey in sorted(stale):
             _delete_record(client, pds, access_jwt, repo_did, rkey)
@@ -454,6 +499,18 @@ def main() -> None:
             "Sync mode: publish/update all feeds from FEEDS config and delete "
             "any stale records not present in FEEDS. Avoids delete-recreate."
         ),
+    )
+    parser.add_argument(
+        "--public-only",
+        action="store_true",
+        dest="public_only",
+        help="Sync only public feeds (requires --sync).",
+    )
+    parser.add_argument(
+        "--internal-only",
+        action="store_true",
+        dest="internal_only",
+        help="Sync only internal (non-public) feeds (requires --sync).",
     )
     parser.add_argument(
         "--list",
@@ -515,6 +572,11 @@ def main() -> None:
     if mode_flags > 1:
         parser.error("Only one of --all, --delete, --delete-all, --list, or --sync can be used at a time.")
 
+    if args.public_only and args.internal_only:
+        parser.error("--public-only and --internal-only are mutually exclusive.")
+    if (args.public_only or args.internal_only) and not args.sync:
+        parser.error("--public-only and --internal-only require --sync.")
+
     # Handle list mode
     if args.list:
         list_feeds(
@@ -533,11 +595,15 @@ def main() -> None:
             parser.error(
                 "--generator-did is required for --sync (or set GE_FEED_GENERATOR_DID)"
             )
+        visibility: Literal["public", "internal"] | None = (
+            "public" if args.public_only else ("internal" if args.internal_only else None)
+        )
         sync_feeds(
             handle=args.handle,
             password=password,
             generator_did=generator_did,
             environment=resolved_environment,
+            visibility=visibility,
             pds=args.pds,
         )
         return

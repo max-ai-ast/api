@@ -32,7 +32,8 @@ FEEDS: dict[str, FeedConfig] = {
     ),
     "random": FeedConfig(
         display_name="Random",
-        description="Development feed — random posts.",
+        description="A random selection of recent posts from the community.",
+        public=True,
         diversify=False,
         gen_request_template=CandidateGenerateRequest.model_construct(
             generators=[GeneratorSpec(name="random_posts", weight=1.0)],
@@ -42,9 +43,10 @@ FEEDS: dict[str, FeedConfig] = {
             exclude_uris=[],
         ),
     ),
-    "ranked": FeedConfig(
-        display_name="Ranked",
-        description="Current-best ranked feed.",
+    "your-feed": FeedConfig(
+        display_name="Your Feed",
+        description="Posts ranked and personalized just for you.",
+        public=True,
         gen_request_template=CandidateGenerateRequest.model_construct(
             generators=[
                 GeneratorSpec(name="post_similarity", weight=0.5),
@@ -62,6 +64,7 @@ FEEDS: dict[str, FeedConfig] = {
     "best-of-friends": FeedConfig(
         display_name="Best of Friends",
         description="The best posts from people you follow, curated just for you.",
+        public=True,
         gen_request_template=CandidateGenerateRequest.model_construct(
             generators=[GeneratorSpec(name="followed_users", weight=1.0)],
             infill=None,

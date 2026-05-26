@@ -10,6 +10,9 @@ import pytest
 from publish_feed import (
     ENV_DISPLAY_PREFIX,
     FEEDS,
+    _acronym,
+    _caterpie_display_name,
+    _caterpie_rkey,
     _create_session,
     _delete_record,
     _list_records,
@@ -17,6 +20,8 @@ from publish_feed import (
     _prefixed_display_name,
     _put_record,
     _resolve_environment,
+    _resolve_feed_publish_params,
+    _stable_hash,
     delete_all_feeds,
     delete_feed,
     list_feeds,
@@ -625,27 +630,23 @@ class TestSyncFeeds:
         captured = capsys.readouterr()
         assert "Published: basic-similarity" in captured.out
         assert "Published: random" in captured.out
-        assert "GreenEarth Similarity" in captured.out
+        assert "Best of Friends" in captured.out
         assert "Deleted stale: old-feed" in captured.out
         assert "Sync complete:" in captured.out
 
     @patch("publish_feed.httpx.Client")
     def test_no_stale_records(self, MockClient, capsys):
-        """sync_feeds with no stale records deletes nothing."""
+        """sync_feeds with no existing records deletes nothing."""
         client = MagicMock()
         MockClient.return_value.__enter__ = MagicMock(return_value=client)
         MockClient.return_value.__exit__ = MagicMock(return_value=False)
 
-        existing_record = {
-            "uri": f"at://{REPO_DID}/app.bsky.feed.generator/basic-similarity",
-            "value": {},
-        }
         feed_count = len(FEEDS)
         client.post.side_effect = [
             _mock_response(200, SESSION_RESPONSE),  # createSession
             *[_mock_response(200, {"cid": "bafyabc"}) for _ in range(feed_count)],
         ]
-        client.get.return_value = _mock_response(200, {"records": [existing_record]})
+        client.get.return_value = _mock_response(200, {"records": []})
 
         sync_feeds(
             handle=HANDLE,
@@ -657,3 +658,228 @@ class TestSyncFeeds:
         captured = capsys.readouterr()
         assert "Deleted stale" not in captured.out
         assert f"{feed_count} published, 0 deleted" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Caterpie helpers
+# ---------------------------------------------------------------------------
+
+
+class TestAcronym:
+    def test_best_of_friends(self):
+        assert _acronym("Best of Friends") == "BOF"
+
+    def test_your_feed(self):
+        assert _acronym("Your Feed") == "YF"
+
+    def test_random(self):
+        assert _acronym("Random") == "R"
+
+    def test_similarity(self):
+        assert _acronym("Similarity") == "S"
+
+
+class TestStableHash:
+    def test_returns_two_hex_chars(self):
+        h = _stable_hash("Best of Friends")
+        assert len(h) == 2
+        assert all(c in "0123456789abcdef" for c in h)
+
+    def test_is_deterministic(self):
+        assert _stable_hash("Best of Friends") == _stable_hash("Best of Friends")
+
+    def test_different_inputs_differ(self):
+        assert _stable_hash("Random") != _stable_hash("Similarity")
+
+
+class TestCaterpieHelpers:
+    def test_display_name_format(self):
+        name = _caterpie_display_name("Best of Friends")
+        h = _stable_hash("Best of Friends")
+        assert name == f"{h} BOF"
+
+    def test_rkey_format_lowercase(self):
+        rkey = _caterpie_rkey("Best of Friends")
+        h = _stable_hash("Best of Friends")
+        assert rkey == f"{h}-bof"
+
+    def test_rkey_valid_at_chars(self):
+        for display_name in [cfg.display_name for cfg in FEEDS.values()]:
+            rkey = _caterpie_rkey(display_name)
+            assert all(c.isalnum() or c == "-" for c in rkey)
+
+
+class TestCaterpieRkeyUniqueness:
+    def test_all_feeds_produce_unique_caterpie_rkeys(self):
+        rkeys = [_caterpie_rkey(cfg.display_name) for cfg in FEEDS.values()]
+        assert len(rkeys) == len(set(rkeys)), f"Caterpie rkey collision: {rkeys}"
+
+
+# ---------------------------------------------------------------------------
+# _resolve_feed_publish_params
+# ---------------------------------------------------------------------------
+
+
+class TestResolveFeedPublishParams:
+    def _public_feed(self):
+        return FEEDS["best-of-friends"]
+
+    def _internal_feed(self):
+        return FEEDS["basic-similarity"]
+
+    def test_prod_public_uses_greenearth_path(self):
+        feed = self._public_feed()
+        rkey, name, desc = _resolve_feed_publish_params("best-of-friends", feed, "prod")
+        assert rkey == "best-of-friends"
+        assert name == feed.display_name
+        assert "GreenEarth" in desc
+
+    def test_prod_internal_uses_caterpie_path(self):
+        feed = self._internal_feed()
+        rkey, name, desc = _resolve_feed_publish_params("basic-similarity", feed, "prod")
+        assert rkey == _caterpie_rkey(feed.display_name)
+        assert name == _caterpie_display_name(feed.display_name)
+        assert desc == "Built by Caterpie"
+
+    def test_dev_any_uses_caterpie_with_ge_prefix(self):
+        feed = self._public_feed()
+        rkey, name, desc = _resolve_feed_publish_params("best-of-friends", feed, "dev")
+        assert rkey == _caterpie_rkey(feed.display_name)
+        assert name.startswith("GE ")
+        assert desc == "Built by Caterpie"
+
+    def test_stage_any_uses_caterpie_with_ge_prefix(self):
+        feed = self._internal_feed()
+        rkey, name, desc = _resolve_feed_publish_params("basic-similarity", feed, "stage")
+        assert rkey == _caterpie_rkey(feed.display_name)
+        assert name.startswith("GE ")
+        assert desc == "Built by Caterpie"
+
+
+# ---------------------------------------------------------------------------
+# Searchability
+# ---------------------------------------------------------------------------
+
+
+class TestSearchability:
+    def test_prod_public_display_name_is_original(self):
+        feed = FEEDS["best-of-friends"]
+        _, name, desc = _resolve_feed_publish_params("best-of-friends", feed, "prod")
+        assert name == feed.display_name
+        assert "greenearth" in desc.lower()
+
+    def test_caterpie_display_name_excludes_original(self):
+        feed = FEEDS["basic-similarity"]
+        _, name, desc = _resolve_feed_publish_params("basic-similarity", feed, "prod")
+        assert feed.display_name not in name
+        assert desc == "Built by Caterpie"
+
+    def test_dev_caterpie_display_name_excludes_original(self):
+        feed = FEEDS["random"]
+        _, name, desc = _resolve_feed_publish_params("random", feed, "dev")
+        assert feed.display_name not in name
+        assert desc == "Built by Caterpie"
+
+
+# ---------------------------------------------------------------------------
+# Display name length guard
+# ---------------------------------------------------------------------------
+
+
+class TestDisplayNameLength:
+    @pytest.mark.parametrize("rkey,feed_cfg", list(FEEDS.items()))
+    @pytest.mark.parametrize("env", ["prod", "stage", "dev"])
+    def test_display_name_within_24_chars(self, rkey, feed_cfg, env):
+        _, name, _ = _resolve_feed_publish_params(rkey, feed_cfg, env)
+        assert len(name) <= 24, f"{rkey} @ {env}: '{name}' is {len(name)} chars"
+
+
+# ---------------------------------------------------------------------------
+# CLI: --public-only / --internal-only
+# ---------------------------------------------------------------------------
+
+
+class TestPublicInternalOnlyCLI:
+    def test_mutually_exclusive(self, monkeypatch):
+        monkeypatch.setenv("GE_BSKY_APP_PASSWORD", PASSWORD)
+        monkeypatch.setenv("GE_FEED_GENERATOR_DID", GENERATOR_DID)
+        with patch("publish_feed.load_dotenv"):
+            with pytest.raises(SystemExit):
+                with patch(
+                    "sys.argv",
+                    ["publish_feed.py", "--handle", HANDLE, "--sync",
+                     "--environment", "prod", "--public-only", "--internal-only"],
+                ):
+                    from publish_feed import main
+                    main()
+
+    def test_public_only_requires_sync(self, monkeypatch):
+        monkeypatch.setenv("GE_BSKY_APP_PASSWORD", PASSWORD)
+        monkeypatch.setenv("GE_FEED_GENERATOR_DID", GENERATOR_DID)
+        with patch("publish_feed.load_dotenv"):
+            with pytest.raises(SystemExit):
+                with patch(
+                    "sys.argv",
+                    ["publish_feed.py", "--handle", HANDLE,
+                     "--all", "--environment", "prod", "--public-only"],
+                ):
+                    from publish_feed import main
+                    main()
+
+    def test_internal_only_requires_sync(self, monkeypatch):
+        monkeypatch.setenv("GE_BSKY_APP_PASSWORD", PASSWORD)
+        monkeypatch.setenv("GE_FEED_GENERATOR_DID", GENERATOR_DID)
+        with patch("publish_feed.load_dotenv"):
+            with pytest.raises(SystemExit):
+                with patch(
+                    "sys.argv",
+                    ["publish_feed.py", "--handle", HANDLE,
+                     "--list", "--internal-only"],
+                ):
+                    from publish_feed import main
+                    main()
+
+    def test_public_only_passes_visibility_public(self, monkeypatch):
+        monkeypatch.setenv("GE_BSKY_APP_PASSWORD", PASSWORD)
+        monkeypatch.setenv("GE_FEED_GENERATOR_DID", GENERATOR_DID)
+        with patch("publish_feed.load_dotenv"):
+            with patch("publish_feed.sync_feeds") as mock_sync:
+                with patch(
+                    "sys.argv",
+                    ["publish_feed.py", "--handle", HANDLE, "--sync",
+                     "--environment", "prod", "--public-only"],
+                ):
+                    from publish_feed import main
+                    main()
+        mock_sync.assert_called_once()
+        assert mock_sync.call_args.kwargs["visibility"] == "public"
+
+    def test_internal_only_passes_visibility_internal(self, monkeypatch):
+        monkeypatch.setenv("GE_BSKY_APP_PASSWORD", PASSWORD)
+        monkeypatch.setenv("GE_FEED_GENERATOR_DID", GENERATOR_DID)
+        with patch("publish_feed.load_dotenv"):
+            with patch("publish_feed.sync_feeds") as mock_sync:
+                with patch(
+                    "sys.argv",
+                    ["publish_feed.py", "--handle", HANDLE, "--sync",
+                     "--environment", "prod", "--internal-only"],
+                ):
+                    from publish_feed import main
+                    main()
+        mock_sync.assert_called_once()
+        assert mock_sync.call_args.kwargs["visibility"] == "internal"
+
+    def test_no_flag_passes_visibility_none(self, monkeypatch):
+        monkeypatch.setenv("GE_BSKY_APP_PASSWORD", PASSWORD)
+        monkeypatch.setenv("GE_FEED_GENERATOR_DID", GENERATOR_DID)
+        with patch("publish_feed.load_dotenv"):
+            with patch("publish_feed.sync_feeds") as mock_sync:
+                with patch(
+                    "sys.argv",
+                    ["publish_feed.py", "--handle", HANDLE, "--sync",
+                     "--environment", "prod"],
+                ):
+                    from publish_feed import main
+                    main()
+        mock_sync.assert_called_once()
+        assert mock_sync.call_args.kwargs["visibility"] is None
