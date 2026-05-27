@@ -28,6 +28,7 @@ from ..models import CandidateGenerateRequest, FeedConfig, FeedCursor, Generator
 from ..lib.atproto_auth import verify_auth_header
 from ..lib.firestore import upsert_feed_activity, upsert_user
 from ..lib.request_cache import request_cache_scope
+from ..lib.telemetry import timed
 from ..feeds import FEEDS
 
 logger = logging.getLogger(__name__)
@@ -134,7 +135,13 @@ async def _run_ranking_pipeline(
     single round-trip.
     """
     async with request_cache_scope():
-        result = await run_generate(gen_request, es, swallow_errors=True)
+        async with timed(
+            logger,
+            "run_generate",
+            num_candidates=gen_request.num_candidates,
+            n_generators=len(gen_request.generators),
+        ):
+            result = await run_generate(gen_request, es, swallow_errors=True)
         candidates = result.candidates
 
         if not candidates:
@@ -144,7 +151,13 @@ async def _run_ranking_pipeline(
             rank_req = feed_cfg.rank_request_template.model_copy(
                 update={"candidates": candidates, "user_did": gen_request.user_did}
             )
-            rank_result = await run_predict(rank_req, es)
+            async with timed(
+                logger,
+                "run_predict",
+                n_candidates=len(candidates),
+                model=rank_req.model,
+            ):
+                rank_result = await run_predict(rank_req, es)
             # Reorder CandidatePosts by model rank and stamp rank_score onto each
             # so MMR uses the model's relevance scores, not the generator scores.
             by_uri = {c.at_uri: c for c in candidates if c.at_uri}
@@ -343,7 +356,8 @@ async def get_feed_skeleton(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid cursor")
 
-        cached_uris = await feed_cache.retrieve(parsed.id)
+        async with timed(logger, "feedcache_retrieve", cache_id=parsed.id):
+            cached_uris = await feed_cache.retrieve(parsed.id)
         if cached_uris is not None:
             if parsed.offset < len(cached_uris):
                 # Serve from the existing cached batch.
@@ -373,7 +387,8 @@ async def get_feed_skeleton(
 
             new_uris = await _run_ranking_pipeline(feed_cfg, gen_request, request.app.state.es)
             if new_uris:
-                updated = await feed_cache.append(parsed.id, new_uris)
+                async with timed(logger, "feedcache_append", cache_id=parsed.id):
+                    updated = await feed_cache.append(parsed.id, new_uris)
                 if updated is not None:
                     page = new_uris[:limit]
                     next_offset = parsed.offset + len(page)
@@ -407,7 +422,8 @@ async def get_feed_skeleton(
     next_cursor = None
     if len(all_uris) > limit:
         cache_key = uuid.uuid4().hex
-        await feed_cache.store(cache_key, all_uris)
+        async with timed(logger, "feedcache_store", cache_id=cache_key):
+            await feed_cache.store(cache_key, all_uris)
         next_cursor = FeedCursor(id=cache_key, offset=limit).encode()
 
     return FeedSkeletonResponse(

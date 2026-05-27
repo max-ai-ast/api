@@ -17,6 +17,7 @@ from ...models import (
     GeneratorSpec,
 )
 from .base import CandidateGenerator, CandidateResult, get_generator
+from ..telemetry import timed
 
 logger = logging.getLogger(__name__)
 
@@ -120,13 +121,14 @@ async def run_generate(
         spec: GeneratorSpec, count: int, gen: CandidateGenerator
     ) -> CandidateResult | None:
         try:
-            return await gen.generate(
-                es=es,
-                user_did=request.user_did,
-                num_candidates=count,
-                video_only=request.video_only,
-                exclude_uris=request.exclude_uris or None,
-            )
+            async with timed(logger, "generator", name=spec.name, count=count):
+                return await gen.generate(
+                    es=es,
+                    user_did=request.user_did,
+                    num_candidates=count,
+                    video_only=request.video_only,
+                    exclude_uris=request.exclude_uris or None,
+                )
         except Exception as exc:
             logger.exception("Candidate generator '%s' failed", spec.name)
             if swallow_errors:

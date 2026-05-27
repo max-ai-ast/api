@@ -8,6 +8,7 @@ from ...models import CandidatePost
 from .base import CandidateGenerator, CandidateResult
 from .utils import candidate_posts_from_es_response
 from ..bsky import get_followed_user_dids, FollowedUsersLookupError
+from ..telemetry import timed
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +44,11 @@ async def followed_users_search(
         must_not.append({"terms": {"at_uri": exclude_uris}})
 
     try:
-        followed_dids: list[str] = await get_followed_user_dids(
-            user_did,
-            limit=MAX_FOLLOWED_USERS,
-        )
+        async with timed(logger, "bsky_get_follows", user_did=user_did):
+            followed_dids: list[str] = await get_followed_user_dids(
+                user_did,
+                limit=MAX_FOLLOWED_USERS,
+            )
     except FollowedUsersLookupError as exc:
         logger.warning(
             "Skipping followed_users candidate generation for %s after follow "
@@ -69,12 +71,18 @@ async def followed_users_search(
         }
     }
 
-    resp = await es.search(
-        index="posts",
-        query=query,
-        size=num_candidates,
-        sort=[{"created_at": "desc"}],
-    )
+    async with timed(
+        logger,
+        "es_followed_users",
+        n_followed=len(followed_dids),
+        num_candidates=num_candidates,
+    ):
+        resp = await es.search(
+            index="posts",
+            query=query,
+            size=num_candidates,
+            sort=[{"created_at": "desc"}],
+        )
     return candidate_posts_from_es_response(resp, generator_name=generator_name)
 
 
