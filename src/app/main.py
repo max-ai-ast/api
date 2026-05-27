@@ -1,7 +1,8 @@
 import os
+import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 
 from .routers import candidates, diversify, health, rank, skylight, xrpc
 from .security import RequireApiKey
@@ -9,6 +10,7 @@ from .lib.atproto_auth import init_id_resolver
 from .lib.feed_cache import FirestoreFeedCache
 from .lib.firestore import init_firestore_client
 from .lib.http_client import close_http_client, init_http_client
+from .lib.request_context import reset_request_id, set_request_id
 
 from elasticsearch import AsyncElasticsearch
 
@@ -159,6 +161,25 @@ app = FastAPI(
     openapi_tags=_TAGS,
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def request_id_mw(request: Request, call_next):
+    """Stamp a server-generated request ID on every request.
+
+    The ID is set as a ContextVar so log lines emitted on the request
+    path (via ``timed()`` or otherwise) can include it. We deliberately
+    ignore any inbound ``x-request-id`` header to avoid log forging or
+    correlation poisoning from untrusted callers.
+    """
+    rid = uuid.uuid4().hex[:12]
+    token = set_request_id(rid)
+    try:
+        response = await call_next(request)
+    finally:
+        reset_request_id(token)
+    response.headers["x-request-id"] = rid
+    return response
 
 
 app.include_router(candidates.router)

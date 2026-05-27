@@ -14,6 +14,7 @@ from .base import Ranker, RankerExecutionError, RankerResult
 from ..elasticsearch import fetch_post_embeddings, fetch_recent_liked_post_uris
 from ..embeddings import decode_float32_b64
 from ..http_client import get_http_client
+from ..request_context import get_request_id
 
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,19 @@ def get_inference_settings() -> tuple[str, str]:
 POST_TOWER_BATCH_SIZE = 32
 
 
+def _build_inference_headers(api_key: str) -> dict[str, str]:
+    """Outbound headers for inference HTTP calls.
+
+    Includes the current request ID (when set) so the inference service
+    can log it alongside our own logs for cross-service correlation.
+    """
+    headers = {"X-API-Key": api_key}
+    rid = get_request_id()
+    if rid is not None:
+        headers["x-request-id"] = rid
+    return headers
+
+
 async def predict_post_tower_batch(
     post_embeddings: list[list[float]],
     *,
@@ -48,7 +62,7 @@ async def predict_post_tower_batch(
     api_key: str,
 ) -> list[list[float]]:
     url = f"{base_url}/models/post-tower/predict"
-    headers = {"X-API-Key": api_key}
+    headers = _build_inference_headers(api_key)
 
     chunks = [
         post_embeddings[i : i + POST_TOWER_BATCH_SIZE]
@@ -81,7 +95,7 @@ async def predict_user_tower_single(
     api_key: str,
 ) -> list[list[float]]:
     url = f"{base_url}/models/user-tower/predict"
-    headers = {"X-API-Key": api_key}
+    headers = _build_inference_headers(api_key)
     payload = {"history_embeddings": history_embeddings}
 
     client = get_http_client()
