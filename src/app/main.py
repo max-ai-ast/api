@@ -1,8 +1,19 @@
+import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+
+# Configure the root logger so app modules' INFO+ messages reach stderr.
+# Uvicorn only configures handlers on its own loggers (uvicorn.error,
+# uvicorn.access) — without this, our `timed()` spans and `profile_written`
+# lines are silently dropped. Level is configurable via GE_LOG_LEVEL.
+logging.basicConfig(
+    level=os.environ.get("GE_LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    force=True,
+)
 
 from .routers import candidates, diversify, health, rank, skylight, xrpc
 from .security import RequireApiKey
