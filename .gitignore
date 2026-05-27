@@ -52,3 +52,6 @@ requirements.txt
 firestore-debug.log
 firebase-debug.log
 .firebase/
+
+# pyinstrument flame charts written when GE_PROFILE=1
+profiles/

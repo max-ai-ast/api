@@ -10,6 +10,7 @@ from .lib.atproto_auth import init_id_resolver
 from .lib.feed_cache import FirestoreFeedCache
 from .lib.firestore import init_firestore_client
 from .lib.http_client import close_http_client, init_http_client
+from .lib.profiling import install_profiling
 from .lib.request_context import reset_request_id, set_request_id
 
 from elasticsearch import AsyncElasticsearch
@@ -161,6 +162,13 @@ app = FastAPI(
     openapi_tags=_TAGS,
     lifespan=lifespan,
 )
+
+
+# Register profiling middleware first so that when both are stacked it ends up
+# *inside* request_id_mw. Starlette runs the last-registered middleware first
+# (outermost); we want request_id_mw outer so the rid is set before profile_mw
+# tries to read it for the output filename.
+install_profiling(app)
 
 
 @app.middleware("http")
