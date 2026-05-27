@@ -14,35 +14,39 @@ def _minimal_gen_request() -> CandidateGenerateRequest:
     )
 
 
+def _minimal_feed_cfg(**kwargs) -> FeedConfig:
+    defaults = dict(
+        display_name="Test",
+        internal_rkey="ab-t",
+        internal_display_name="ab T",
+        gen_request_template=_minimal_gen_request(),
+    )
+    return FeedConfig(**{**defaults, **kwargs})
+
+
 class TestFeedConfig:
     def test_public_defaults_to_false(self):
-        cfg = FeedConfig(display_name="Test", gen_request_template=_minimal_gen_request())
-        assert cfg.public is False
+        assert _minimal_feed_cfg().public is False
 
     def test_public_can_be_set_true(self):
-        cfg = FeedConfig(display_name="Test", public=True, gen_request_template=_minimal_gen_request())
-        assert cfg.public is True
+        assert _minimal_feed_cfg(public=True).public is True
 
     def test_rejects_display_name_over_19_chars(self):
         with pytest.raises(ValidationError):
-            FeedConfig(display_name="A" * 20, gen_request_template=_minimal_gen_request())
+            _minimal_feed_cfg(display_name="A" * 20)
 
     def test_accepts_display_name_of_exactly_19_chars(self):
-        cfg = FeedConfig(display_name="A" * 19, gen_request_template=_minimal_gen_request())
-        assert len(cfg.display_name) == 19
+        assert len(_minimal_feed_cfg(display_name="A" * 19).display_name) == 19
 
-    def test_internal_rkey_defaults_to_none(self):
-        cfg = FeedConfig(display_name="Test", gen_request_template=_minimal_gen_request())
-        assert cfg.internal_rkey is None
+    def test_internal_rkey_is_required(self):
+        with pytest.raises(ValidationError):
+            _minimal_feed_cfg(internal_rkey=None)
 
-    def test_internal_display_name_defaults_to_none(self):
-        cfg = FeedConfig(display_name="Test", gen_request_template=_minimal_gen_request())
-        assert cfg.internal_display_name is None
+    def test_internal_display_name_is_required(self):
+        with pytest.raises(ValidationError):
+            _minimal_feed_cfg(internal_display_name=None)
 
-    def test_internal_rkey_can_be_set(self):
-        cfg = FeedConfig(display_name="Test", internal_rkey="e2-s", gen_request_template=_minimal_gen_request())
+    def test_internal_fields_can_be_set(self):
+        cfg = _minimal_feed_cfg(internal_rkey="e2-s", internal_display_name="e2 S")
         assert cfg.internal_rkey == "e2-s"
-
-    def test_internal_display_name_can_be_set(self):
-        cfg = FeedConfig(display_name="Test", internal_display_name="e2 S", gen_request_template=_minimal_gen_request())
         assert cfg.internal_display_name == "e2 S"
