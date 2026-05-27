@@ -655,6 +655,45 @@ class TestSyncFeeds:
         assert "Deleted stale" not in captured.out
         assert f"{feed_count} published, 0 deleted" in captured.out
 
+    @patch("publish_feed.httpx.Client")
+    def test_internal_only_does_not_delete_public_feed_caterpie_records(self, MockClient, capsys):
+        """A prod --internal-only sync must not delete public feeds' Caterpie
+        records that were published by an earlier stage (unfiltered) deployment."""
+        client = MagicMock()
+        MockClient.return_value.__enter__ = MagicMock(return_value=client)
+        MockClient.return_value.__exit__ = MagicMock(return_value=False)
+
+        # Simulate stage having already published all four feeds to Caterpie.
+        public_feed_rkeys = [
+            cfg.internal_rkey for cfg in FEEDS.values() if cfg.public
+        ]
+        internal_feed_rkeys = [
+            cfg.internal_rkey for cfg in FEEDS.values() if not cfg.public
+        ]
+        stage_records = [
+            {"uri": f"at://{REPO_DID}/app.bsky.feed.generator/{rkey}", "value": {}}
+            for rkey in public_feed_rkeys + internal_feed_rkeys
+        ]
+        client.post.side_effect = [
+            _mock_response(200, SESSION_RESPONSE),  # createSession
+            *[_mock_response(200, {"cid": "bafyabc"}) for _ in internal_feed_rkeys],
+        ]
+        client.get.return_value = _mock_response(200, {"records": stage_records})
+
+        sync_feeds(
+            handle=HANDLE,
+            password=PASSWORD,
+            generator_did=GENERATOR_DID,
+            environment="prod",
+            visibility="internal",
+            pds=PDS,
+        )
+
+        captured = capsys.readouterr()
+        assert "Deleted stale" not in captured.out
+        for rkey in public_feed_rkeys:
+            assert rkey not in captured.out or f"Deleted stale: {rkey}" not in captured.out
+
 
 # ---------------------------------------------------------------------------
 # _resolve_feed_publish_params

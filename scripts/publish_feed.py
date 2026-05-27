@@ -434,7 +434,14 @@ def sync_feeds(
             _put_record(client, pds, access_jwt, repo_did, published_rkey, record)
             print(f"  Published: {rkey} ({display_name})")
 
-        stale = existing_rkeys - desired_rkeys
+        if visibility is None:
+            stale = existing_rkeys - desired_rkeys
+        else:
+            # When syncing a visibility subset, restrict cleanup to rkeys owned
+            # by feeds in this class. Without this, an --internal-only prod pass
+            # would delete public feeds' Caterpie records left by a stage deploy.
+            class_rkeys = {cfg.internal_rkey for _, cfg in feed_items} | {rkey for rkey, _ in feed_items}
+            stale = (existing_rkeys & class_rkeys) - desired_rkeys
         for rkey in sorted(stale):
             _delete_record(client, pds, access_jwt, repo_did, rkey)
             print(f"  Deleted stale: {rkey}")
