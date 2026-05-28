@@ -55,3 +55,6 @@ firebase-debug.log
 
 # pyinstrument flame charts written when GE_PROFILE=1
 profiles/
+
+# macOS metadata files
+.DS_Store
