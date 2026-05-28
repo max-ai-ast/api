@@ -11,6 +11,7 @@ from fastapi import HTTPException
 
 from .embeddings import MINILM_L12_EMBEDDING_FIELD, MINILM_L12_EMBEDDING_KEY
 from .request_cache import get_request_cache
+from .telemetry import timed
 
 logger = logging.getLogger(__name__)
 
@@ -57,27 +58,30 @@ async def fetch_recent_liked_post_uris(
         return []
 
     async def _fetch() -> list[str]:
-        query = {
-            "bool": {
-                "filter": [{"terms": {"author_did": user_dids}}],
+        async with timed(
+            logger, "es_recent_likes", n_users=len(user_dids), limit=limit
+        ):
+            query = {
+                "bool": {
+                    "filter": [{"terms": {"author_did": user_dids}}],
+                }
             }
-        }
 
-        resp = await es.search(
-            index="likes",
-            query=query,
-            size=limit,
-            sort=[{"created_at": "desc"}],
-            _source=["subject_uri"],
-        )
+            resp = await es.search(
+                index="likes",
+                query=query,
+                size=limit,
+                sort=[{"created_at": "desc"}],
+                _source=["subject_uri"],
+            )
 
-        data = unwrap_es_response(resp)
-        uris: list[str] = []
-        for hit in data.get("hits", {}).get("hits", []):
-            uri = (hit.get("_source") or {}).get("subject_uri")
-            if uri:
-                uris.append(uri)
-        return uris
+            data = unwrap_es_response(resp)
+            uris: list[str] = []
+            for hit in data.get("hits", {}).get("hits", []):
+                uri = (hit.get("_source") or {}).get("subject_uri")
+                if uri:
+                    uris.append(uri)
+            return uris
 
     cache = get_request_cache()
     if cache is None:
@@ -102,34 +106,35 @@ async def fetch_post_embeddings(
         return []
 
     async def _fetch() -> list[tuple[str, list[float]]]:
-        query = {"terms": {"at_uri": at_uris}}
+        async with timed(logger, "es_post_embeddings", n_uris=len(at_uris)):
+            query = {"terms": {"at_uri": at_uris}}
 
-        resp = await es.search(
-            index="posts",
-            query=query,
-            size=len(at_uris),
-            _source=["at_uri", MINILM_L12_EMBEDDING_FIELD],
-        )
+            resp = await es.search(
+                index="posts",
+                query=query,
+                size=len(at_uris),
+                _source=["at_uri", MINILM_L12_EMBEDDING_FIELD],
+            )
 
-        data = unwrap_es_response(resp)
-        embeddings_by_uri: dict[str, list[float]] = {}
-        for hit in data.get("hits", {}).get("hits", []):
-            src = hit.get("_source") or {}
-            at_uri = src.get("at_uri")
-            if not at_uri:
-                continue
-            emb = src.get("embeddings")
-            if isinstance(emb, dict):
-                vec = emb.get(MINILM_L12_EMBEDDING_KEY)
+            data = unwrap_es_response(resp)
+            embeddings_by_uri: dict[str, list[float]] = {}
+            for hit in data.get("hits", {}).get("hits", []):
+                src = hit.get("_source") or {}
+                at_uri = src.get("at_uri")
+                if not at_uri:
+                    continue
+                emb = src.get("embeddings")
+                if isinstance(emb, dict):
+                    vec = emb.get(MINILM_L12_EMBEDDING_KEY)
+                    if vec:
+                        embeddings_by_uri[at_uri] = vec
+
+            ordered_embeddings: list[tuple[str, list[float]]] = []
+            for at_uri in at_uris:
+                vec = embeddings_by_uri.get(at_uri)
                 if vec:
-                    embeddings_by_uri[at_uri] = vec
-
-        ordered_embeddings: list[tuple[str, list[float]]] = []
-        for at_uri in at_uris:
-            vec = embeddings_by_uri.get(at_uri)
-            if vec:
-                ordered_embeddings.append((at_uri, vec))
-        return ordered_embeddings
+                    ordered_embeddings.append((at_uri, vec))
+            return ordered_embeddings
 
     cache = get_request_cache()
     if cache is None:
