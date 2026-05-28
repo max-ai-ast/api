@@ -48,6 +48,12 @@ async def knn_search_posts(
 
     Uses the MiniLM L12 embedding field for nearest-neighbour matching. Each
     hit is converted to a :class:`CandidatePost` with the ES score attached.
+
+    Filters are passed *inside* the kNN clause so ES applies them as
+    pre-filters during HNSW traversal — vs. wrapping ``knn`` in
+    ``bool.must`` with sibling ``filter`` / ``must_not``, which would
+    post-filter and force repeated re-searches whenever excluded docs
+    (e.g. replies) dominate the candidate pool.
     """
     filters: list[dict] = []
     if video_only:
@@ -57,23 +63,26 @@ async def knn_search_posts(
     if exclude_uris:
         must_not.append({"terms": {"at_uri": exclude_uris}})
 
-    knn_query = {
-        "bool": {
-            "must": {
-                "knn": {
-                    "field": MINILM_L12_EMBEDDING_FIELD,
-                    "query_vector": query_vector,
-                    "k": num_candidates,
-                    "num_candidates": max(100, num_candidates * 10),
-                }
-            },
-            "filter": filters,
-            **("must_not" and {"must_not": must_not} if must_not else {}),
-        }
+    knn_clause = {
+        "field": MINILM_L12_EMBEDDING_FIELD,
+        "query_vector": query_vector,
+        "k": num_candidates,
+        "num_candidates": max(100, num_candidates * 10),
+        "filter": {
+            "bool": {
+                "filter": filters,
+                "must_not": must_not,
+            }
+        },
     }
 
     async with timed(logger, "knn_search_posts", index=POSTS_KNN_INDEX, num_candidates=num_candidates):
-        resp = await es.search(index=POSTS_KNN_INDEX, query=knn_query, size=num_candidates, request_timeout=60)
+        resp = await es.search(
+            index=POSTS_KNN_INDEX,
+            knn=knn_clause,
+            size=num_candidates,
+            request_timeout=60,
+        )
 
     return candidate_posts_from_es_response(resp, generator_name=generator_name)
 

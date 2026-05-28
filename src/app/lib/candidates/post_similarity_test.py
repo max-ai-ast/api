@@ -33,10 +33,11 @@ class FakeEs:
         self._default = {"hits": {"hits": []}}
         self.calls: list[dict] = []
 
-    async def search(self, *, index=None, query=None, size=None, sort=None, _source=None, **kwargs):
+    async def search(self, *, index=None, query=None, knn=None, size=None, sort=None, _source=None, **kwargs):
         self.calls.append({
             "index": index,
             "query": query,
+            "knn": knn,
             "size": size,
             "sort": sort,
             "_source": _source,
@@ -224,8 +225,8 @@ class TestKnnSearchPosts:
             "posts_recent": {"hits": {"hits": []}}
         })
         await knn_search_posts(es, [0.1, 0.2], num_candidates=5, video_only=True)
-        query = es.calls[0]["query"]
-        assert {"term": {"contains_video": True}} in query["bool"]["filter"]
+        knn = es.calls[0]["knn"]
+        assert {"term": {"contains_video": True}} in knn["filter"]["bool"]["filter"]
 
     @pytest.mark.asyncio
     async def test_video_only_false_omits_filter(self):
@@ -233,8 +234,33 @@ class TestKnnSearchPosts:
             "posts_recent": {"hits": {"hits": []}}
         })
         await knn_search_posts(es, [0.1, 0.2], num_candidates=5, video_only=False)
-        query = es.calls[0]["query"]
-        assert query["bool"]["filter"] == []
+        knn = es.calls[0]["knn"]
+        assert knn["filter"]["bool"]["filter"] == []
+
+    @pytest.mark.asyncio
+    async def test_reply_exclusion_is_a_prefilter(self):
+        """Replies must be excluded via knn.filter (pre-filter), not via a
+        sibling must_not (post-filter)."""
+        es = FakeEs(responses={
+            "posts_recent": {"hits": {"hits": []}}
+        })
+        await knn_search_posts(es, [0.1, 0.2], num_candidates=5)
+        knn = es.calls[0]["knn"]
+        # The thread_parent_post exists clause must live inside the kNN
+        # filter's must_not, not outside as a sibling of the knn clause.
+        assert es.calls[0]["query"] is None
+        assert {"exists": {"field": "thread_parent_post"}} in knn["filter"]["bool"]["must_not"]
+
+    @pytest.mark.asyncio
+    async def test_exclude_uris_is_a_prefilter(self):
+        es = FakeEs(responses={
+            "posts_recent": {"hits": {"hits": []}}
+        })
+        await knn_search_posts(
+            es, [0.1, 0.2], num_candidates=5, exclude_uris=["at://a", "at://b"]
+        )
+        knn = es.calls[0]["knn"]
+        assert {"terms": {"at_uri": ["at://a", "at://b"]}} in knn["filter"]["bool"]["must_not"]
 
 
 # ---------------------------------------------------------------------------
