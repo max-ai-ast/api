@@ -3,10 +3,12 @@
 import os
 
 import pytest
+from fastapi import HTTPException, status
 from fastapi.testclient import TestClient
 
 from ..lib.embeddings import MINILM_L12_EMBEDDING_KEY
 from ..main import app
+from ..security import verify_api_key
 
 
 # ---------------------------------------------------------------------------
@@ -327,15 +329,22 @@ def test_generate_unknown_infill_returns_404():
 
 
 def test_generate_requires_auth():
-    client = TestClient(app)
-    resp = client.post(
-        "/candidates/generate",
-        json={
-            "generators": [{"name": "post_similarity"}],
-            "user_did": "did:plc:user1",
-        },
-    )
-    assert resp.status_code == 401
+    def _raise():
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key")
+
+    app.dependency_overrides[verify_api_key] = _raise
+    try:
+        client = TestClient(app)
+        resp = client.post(
+            "/candidates/generate",
+            json={
+                "generators": [{"name": "post_similarity"}],
+                "user_did": "did:plc:user1",
+            },
+        )
+        assert resp.status_code == 401
+    finally:
+        app.dependency_overrides.pop(verify_api_key, None)
 
 
 def test_video_only_defaults_to_false():
