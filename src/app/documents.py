@@ -57,12 +57,11 @@ class ApiKeyDocument(BaseModel):
     """An issued API key stored in the ``api_keys`` collection.
 
     The document ID in Firestore is ``key_id``.
-    The plaintext key is never stored — only the salted SHA-256 hash.
+    The plaintext key is never stored — only the SHA-256 hash.
     """
 
     key_id: str = Field(..., description="8 hex chars; also the Firestore document ID")
-    key_hash: str = Field(..., description="SHA-256(bytes.fromhex(salt) + full_key.encode()) as hex")
-    salt: str = Field(..., description="32 hex chars, random per key")
+    key_hash: str = Field(..., description="SHA-256(full_key.encode()) as hex")
     email: str = Field(..., description="Owner email address")
     is_active: bool = Field(default=True, description="Whether this API key is valid and usable")
     created_at: datetime = Field(default_factory=_utcnow, description="When the key was created")

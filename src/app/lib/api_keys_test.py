@@ -15,34 +15,28 @@ from ..lib.api_keys import (
 
 
 class TestGenerateKey:
-    def test_returns_four_values(self):
+    def test_returns_three_values(self):
         result = generate_key()
-        assert len(result) == 4
+        assert len(result) == 3
 
     def test_full_key_format(self):
-        key_id, full_key, salt, key_hash = generate_key()
+        key_id, full_key, key_hash = generate_key()
         assert full_key.startswith(KEY_PREFIX)
         assert len(full_key) == FULL_KEY_LEN
 
     def test_key_id_is_8_hex_chars(self):
-        key_id, full_key, salt, key_hash = generate_key()
+        key_id, full_key, key_hash = generate_key()
         assert len(key_id) == 8
-        int(key_id, 16)  # raises ValueError if not hex
-
-    def test_salt_is_32_hex_chars(self):
-        key_id, full_key, salt, key_hash = generate_key()
-        assert len(salt) == 32
-        int(salt, 16)  # raises ValueError if not hex
+        int(key_id, 16)
 
     def test_key_hash_is_hex(self):
-        key_id, full_key, salt, key_hash = generate_key()
+        key_id, full_key, key_hash = generate_key()
         assert len(key_hash) == 64
         int(key_hash, 16)
 
     def test_hash_verifies(self):
-        key_id, full_key, salt, key_hash = generate_key()
-        expected = _hash_key(salt, full_key)
-        assert hmac.compare_digest(expected, key_hash)
+        key_id, full_key, key_hash = generate_key()
+        assert hmac.compare_digest(_hash_key(full_key), key_hash)
 
     def test_keys_are_unique(self):
         keys = [generate_key()[1] for _ in range(10)]
@@ -51,22 +45,15 @@ class TestGenerateKey:
 
 class TestHashKey:
     def test_deterministic(self):
-        assert _hash_key("aabb", "gea_key") == _hash_key("aabb", "gea_key")
-
-    def test_different_salts_produce_different_hashes(self):
-        h1 = _hash_key("aabb", "gea_key")
-        h2 = _hash_key("ccdd", "gea_key")
-        assert h1 != h2
+        assert _hash_key("gea_key") == _hash_key("gea_key")
 
     def test_different_keys_produce_different_hashes(self):
-        h1 = _hash_key("aabb", "gea_key1")
-        h2 = _hash_key("aabb", "gea_key2")
-        assert h1 != h2
+        assert _hash_key("gea_key1") != _hash_key("gea_key2")
 
 
 class TestParseKeyId:
     def test_returns_key_id_from_valid_key(self):
-        key_id, full_key, _, _ = generate_key()
+        key_id, full_key, _ = generate_key()
         assert parse_key_id(full_key) == key_id
 
     def test_returns_none_for_wrong_prefix(self):
@@ -108,11 +95,10 @@ def _make_doc_data(
     monthly_call_count: int = 0,
 ) -> dict:
     now = datetime.now(timezone.utc)
-    _, _, salt, key_hash = generate_key()
+    _, _, key_hash = generate_key()
     return {
         "key_id": key_id,
         "key_hash": key_hash,
-        "salt": salt,
         "email": "test@example.com",
         "is_active": is_active,
         "created_at": now,
@@ -223,9 +209,8 @@ class TestAuthenticateApiKey:
 
     @pytest.mark.asyncio
     async def test_returns_none_when_key_inactive(self):
-        key_id, full_key, salt, key_hash = generate_key()
+        key_id, full_key, key_hash = generate_key()
         data = _make_doc_data(key_id=key_id, is_active=False)
-        data["salt"] = salt
         data["key_hash"] = key_hash
         db, _ = _mock_firestore(data, exists=True)
 
@@ -233,9 +218,8 @@ class TestAuthenticateApiKey:
 
     @pytest.mark.asyncio
     async def test_returns_none_for_wrong_secret(self):
-        key_id, full_key, salt, key_hash = generate_key()
+        key_id, full_key, key_hash = generate_key()
         data = _make_doc_data(key_id=key_id, is_active=True)
-        data["salt"] = salt
         data["key_hash"] = key_hash
         db, _ = _mock_firestore(data, exists=True)
 
@@ -244,9 +228,8 @@ class TestAuthenticateApiKey:
 
     @pytest.mark.asyncio
     async def test_returns_document_for_valid_key(self):
-        key_id, full_key, salt, key_hash = generate_key()
+        key_id, full_key, key_hash = generate_key()
         data = _make_doc_data(key_id=key_id, is_active=True, monthly_period="2026-05")
-        data["salt"] = salt
         data["key_hash"] = key_hash
         db, doc_ref = _mock_firestore(data, exists=True)
 
@@ -258,10 +241,9 @@ class TestAuthenticateApiKey:
 
     @pytest.mark.asyncio
     async def test_increments_call_count_same_month(self):
-        key_id, full_key, salt, key_hash = generate_key()
+        key_id, full_key, key_hash = generate_key()
         now = datetime.now(timezone.utc)
         data = _make_doc_data(key_id=key_id, monthly_period=now.strftime("%Y-%m"))
-        data["salt"] = salt
         data["key_hash"] = key_hash
         db, doc_ref = _mock_firestore(data, exists=True)
 
@@ -272,9 +254,8 @@ class TestAuthenticateApiKey:
 
     @pytest.mark.asyncio
     async def test_resets_counters_on_new_month(self):
-        key_id, full_key, salt, key_hash = generate_key()
+        key_id, full_key, key_hash = generate_key()
         data = _make_doc_data(key_id=key_id, monthly_period="2025-01", monthly_call_count=100)
-        data["salt"] = salt
         data["key_hash"] = key_hash
         db, doc_ref = _mock_firestore(data, exists=True)
 
