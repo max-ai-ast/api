@@ -37,6 +37,9 @@ async def lifespan(app: FastAPI):
     if not os.environ.get("GE_ELASTICSEARCH_API_KEY"):
         raise RuntimeError("GE_ELASTICSEARCH_API_KEY environment variable is required")
 
+    if not os.environ.get("GE_FEED_CONTEXT_SECRET"):
+        raise RuntimeError("GE_FEED_CONTEXT_SECRET environment variable is required")
+
     es_url = os.environ.get("GE_ELASTICSEARCH_URL", "https://localhost:9200")
     es_api_key = os.environ.get("GE_ELASTICSEARCH_API_KEY")
     es_verify = os.environ.get("GE_ELASTICSEARCH_VERIFY_SSL", "false").lower() in (

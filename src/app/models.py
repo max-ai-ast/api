@@ -165,3 +165,8 @@ class FeedConfig(BaseModel):
         description="When set, candidates are ranked by this model before being returned.",
     )
     diversify: bool = Field(True, description="When False, MMR reranking is skipped.")
+    accepts_interactions: bool = Field(
+        True,
+        description="When True, the published record declares acceptsInteractions so the "
+        "AppView forwards interaction signals to sendInteractions.",
+    )
