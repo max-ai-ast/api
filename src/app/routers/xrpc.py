@@ -275,81 +275,16 @@ async def describe_feed_generator() -> DescribeFeedGeneratorResponse:
     )
 
 
-@router.get(
-    "/xrpc/app.bsky.feed.getFeedSkeleton",
-    response_model=FeedSkeletonResponse,
-    response_model_exclude_none=True,
-)
-async def get_feed_skeleton(
+async def _render_feed(
     request: Request,
-    feed: str = Query(..., description="AT URI of the requested feed"),
-    limit: int = Query(30, ge=1, le=100, description="Max number of posts"),
-    cursor: str | None = Query(None, description="Pagination cursor"),
+    limit: int,
+    cursor: str | None,
+    user_did: str,
+    feed_name: str,
+    feed_cfg,
+    feed_cache,
 ) -> FeedSkeletonResponse:
-    """Return a feed skeleton for the requested feed.
-
-    The ``feed`` query parameter must be the full AT URI of one of the
-    feeds declared by ``describeFeedGenerator``.
-    """
-    # Resolve which feed was requested by extracting the rkey (feed short
-    # name) from the AT URI.  The URI's authority is the *publisher* DID
-    # (the account that owns the record), which differs from the service DID,
-    # so we match on the rkey alone.
-    feed_name: str | None = None
-    try:
-        # at://<did>/app.bsky.feed.generator/<rkey>
-        rkey = feed.split("/")[-1]
-        collection = feed.split("/")[-2] if feed.count("/") >= 4 else ""
-    except Exception:
-        rkey = ""
-        collection = ""
-
-    if collection == "app.bsky.feed.generator":
-        if rkey in FEEDS:
-            feed_name = rkey
-        else:
-            for key, cfg in FEEDS.items():
-                if cfg.internal_rkey == rkey:
-                    feed_name = key
-                    break
-
-    if feed_name is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown feed: {feed}",
-        )
-
-    feed_cfg = FEEDS[feed_name]
-
-    # Authenticate the requesting user via the AT Protocol inter-service JWT.
-    # A valid DID is required for this feed endpoint.
-    user_did = await verify_auth_header(request, service_did=_get_service_did())
-
-    if not user_did:
-        if request.headers.get("Authorization"):
-            logger.warning("Auth header present but verification failed for feed %s", feed_name)
-        else:
-            logger.warning("No auth header present for feed %s", feed_name)
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication required",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    # Record authenticated users in Firestore for backend analytics. Runs in
-    # the background since this isn't essential for serving.
-    db = getattr(request.app.state, "firestore", None)
-    if db is None:
-        logger.error("Firestore client not initialized")
-        raise HTTPException(status_code=500, detail="Firestore unavailable")
-
-    _spawn_background(_record_session(request, user_did, feed_name, db))
-
-    feed_cache = _get_feed_cache(request)
-
-    # ------------------------------------------------------------------
-    # If the client sent a cursor, try to serve the next page from cache.
-    # ------------------------------------------------------------------
+    """Serve a feed page: cache lookup, candidate generation, ranking, diversify."""
     if cursor is not None:
         try:
             parsed = FeedCursor.decode(cursor)
@@ -360,22 +295,16 @@ async def get_feed_skeleton(
             cached_uris = await feed_cache.retrieve(parsed.id)
         if cached_uris is not None:
             if parsed.offset < len(cached_uris):
-                # Serve from the existing cached batch.
                 page = cached_uris[parsed.offset : parsed.offset + limit]
                 next_offset = parsed.offset + len(page)
                 next_cursor: str | None = None
                 if page:
-                    # Always return a cursor when there are results.
-                    # When next_offset reaches the end of the cache the
-                    # next request will fall into the regeneration branch
-                    # below, which fetches fresh candidates.
                     next_cursor = FeedCursor(id=parsed.id, offset=next_offset).encode()
                 return FeedSkeletonResponse(
                     feed=[SkeletonItem(post=uri) for uri in page],
                     cursor=next_cursor,
                 )
 
-            # Offset is at or past the end — regenerate with exclusions.
             batch = _batch_size(limit)
             gen_request = feed_cfg.gen_request_template.model_copy(
                 update={
@@ -400,14 +329,8 @@ async def get_feed_skeleton(
                         cursor=next_cursor,
                     )
 
-            # Append failed or nothing new — end of feed.
             return FeedSkeletonResponse(feed=[])
 
-        # Cache miss (expired / evicted) — fall through to generate fresh.
-
-    # ------------------------------------------------------------------
-    # No cursor or cache miss — generate a fresh batch.
-    # ------------------------------------------------------------------
     batch = _batch_size(limit)
     gen_request = feed_cfg.gen_request_template.model_copy(
         update={"user_did": user_did, "num_candidates": batch}
@@ -415,10 +338,8 @@ async def get_feed_skeleton(
 
     all_uris = await _run_ranking_pipeline(feed_cfg, gen_request, request.app.state.es)
 
-    # First page to return immediately.
     page = all_uris[:limit]
 
-    # Store the full batch and issue a cursor only when there are more pages.
     next_cursor = None
     if len(all_uris) > limit:
         cache_key = uuid.uuid4().hex
@@ -430,3 +351,68 @@ async def get_feed_skeleton(
         feed=[SkeletonItem(post=uri) for uri in page],
         cursor=next_cursor,
     )
+
+
+@router.get(
+    "/xrpc/app.bsky.feed.getFeedSkeleton",
+    response_model=FeedSkeletonResponse,
+    response_model_exclude_none=True,
+)
+async def get_feed_skeleton(
+    request: Request,
+    feed: str = Query(..., description="AT URI of the requested feed"),
+    limit: int = Query(30, ge=1, le=100, description="Max number of posts"),
+    cursor: str | None = Query(None, description="Pagination cursor"),
+) -> FeedSkeletonResponse:
+    """Return a feed skeleton for the requested feed."""
+    feed_name: str | None = None
+    try:
+        rkey = feed.split("/")[-1]
+        collection = feed.split("/")[-2] if feed.count("/") >= 4 else ""
+    except Exception:
+        rkey = ""
+        collection = ""
+
+    if collection == "app.bsky.feed.generator":
+        if rkey in FEEDS:
+            feed_name = rkey
+        else:
+            for key, cfg in FEEDS.items():
+                if cfg.internal_rkey == rkey:
+                    feed_name = key
+                    break
+
+    if feed_name is None:
+        raise HTTPException(status_code=400, detail=f"Unknown feed: {feed}")
+
+    feed_cfg = FEEDS[feed_name]
+
+    user_did = await verify_auth_header(request, service_did=_get_service_did())
+
+    if not user_did:
+        if request.headers.get("Authorization"):
+            logger.warning("Auth header present but verification failed for feed %s", feed_name)
+        else:
+            logger.warning("No auth header present for feed %s", feed_name)
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    db = getattr(request.app.state, "firestore", None)
+    if db is None:
+        logger.error("Firestore client not initialized")
+        raise HTTPException(status_code=500, detail="Firestore unavailable")
+
+    _spawn_background(_record_session(request, user_did, feed_name, db))
+
+    feed_cache = _get_feed_cache(request)
+
+    async with timed(
+        logger,
+        "get_feed_skeleton",
+        metric_name="feed.render.duration_ms",
+        feed_name=feed_name,
+    ):
+        return await _render_feed(request, limit, cursor, user_did, feed_name, feed_cfg, feed_cache)
