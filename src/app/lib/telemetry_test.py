@@ -1,5 +1,6 @@
 """Tests for telemetry.timed()."""
 
+import logging
 import pytest
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
@@ -14,12 +15,11 @@ def _make_collector() -> tuple[MetricCollector, InMemoryMetricReader]:
 
 
 @pytest.mark.asyncio
-async def test_timed_records_metric_when_metric_name_given():
+async def test_records_metric_when_record_metric_true():
     collector, reader = _make_collector()
     set_metric_collector(collector)
     try:
-        import logging
-        async with timed(logging.getLogger("test"), "op", metric_name="op.duration_ms", tag="val"):
+        async with timed(logging.getLogger("test"), "op.duration_ms", record_metric=True):
             pass
         data = reader.get_metrics_data()
         names: set[str] = set()
@@ -36,12 +36,11 @@ async def test_timed_records_metric_when_metric_name_given():
 
 
 @pytest.mark.asyncio
-async def test_timed_no_metric_without_metric_name():
+async def test_no_metric_when_record_metric_false():
     collector, reader = _make_collector()
     set_metric_collector(collector)
     try:
-        import logging
-        async with timed(logging.getLogger("test"), "op"):
+        async with timed(logging.getLogger("test"), "op.duration_ms"):
             pass
         data = reader.get_metrics_data()
         names: set[str] = set()
@@ -58,28 +57,60 @@ async def test_timed_no_metric_without_metric_name():
 
 
 @pytest.mark.asyncio
-async def test_timed_no_metric_without_collector():
+async def test_no_metric_without_collector():
     set_metric_collector(None)
-    import logging
-    async with timed(logging.getLogger("test"), "op", metric_name="op.duration_ms"):
+    async with timed(logging.getLogger("test"), "op.duration_ms", record_metric=True):
         pass
-    # No exception means we gracefully handle missing collector
 
 
 @pytest.mark.asyncio
-async def test_timed_attaches_extra_as_attributes():
+async def test_metric_attrs_become_metric_labels():
     collector, reader = _make_collector()
     set_metric_collector(collector)
     try:
-        import logging
-        async with timed(logging.getLogger("test"), "op", metric_name="op.duration_ms", feed_name="nature"):
+        async with timed(
+            logging.getLogger("test"),
+            "feed.render.duration_ms",
+            record_metric=True,
+            metric_attrs={"feed_name": "nature"},
+        ):
             pass
         data = reader.get_metrics_data()
-        for rm in data.resource_metrics:
-            for sm in rm.scope_metrics:
-                for metric in sm.metrics:
-                    if metric.name == "op.duration_ms":
-                        dp = metric.data.data_points[0]
-                        assert dp.attributes.get("feed_name") == "nature"
+        found = False
+        if data is not None:
+            for rm in data.resource_metrics:
+                for sm in rm.scope_metrics:
+                    for metric in sm.metrics:
+                        if metric.name == "feed.render.duration_ms":
+                            dp = metric.data.data_points[0]
+                            assert dp.attributes.get("feed_name") == "nature"
+                            found = True
+        assert found
+    finally:
+        set_metric_collector(None)
+
+
+@pytest.mark.asyncio
+async def test_extra_kwargs_not_in_metric_attrs():
+    """**extra (log-only) kwargs must not appear as metric attributes."""
+    collector, reader = _make_collector()
+    set_metric_collector(collector)
+    try:
+        async with timed(
+            logging.getLogger("test"),
+            "feed.render.duration_ms",
+            record_metric=True,
+            metric_attrs={"feed_name": "nature"},
+            count=42,
+        ):
+            pass
+        data = reader.get_metrics_data()
+        if data is not None:
+            for rm in data.resource_metrics:
+                for sm in rm.scope_metrics:
+                    for metric in sm.metrics:
+                        if metric.name == "feed.render.duration_ms":
+                            dp = metric.data.data_points[0]
+                            assert "count" not in dp.attributes
     finally:
         set_metric_collector(None)

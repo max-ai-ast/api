@@ -1,12 +1,10 @@
 """OpenTelemetry-based metric collector for GCP Cloud Monitoring.
 
-Mirrors the OTelMetricCollector design from ingex (PR #231), ported to Python.
 When GE_GCP_PROJECT_ID is set, metrics are exported to GCP Cloud Monitoring
 under the prefix ``custom.googleapis.com/greenearth-api/``.  When it is empty
 the stdout exporter is used, which is useful for local development.
 
-Instrument type is inferred from the metric name suffix, matching the ingex
-convention:
+Instrument type is inferred from the metric name suffix:
   - ``_count`` → Int64Counter  (cumulative sum)
   - ``_rate``  → ObservableGauge (current value)
   - everything else → Float64Histogram  (timing, durations, etc.)
