@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from ..lib.candidates import run_generate
 from ..lib.diversify import mmr_rerank
+from ..lib.perspective import perspective_rerank
 from ..lib.feed_cache import FeedCache, FirestoreFeedCache, DEFAULT_TTL_SECONDS
 from ..lib.rankers import run_predict
 from ..models import CandidateGenerateRequest, FeedConfig, FeedCursor, GeneratorSpec, RankPredictRequest
@@ -168,6 +169,10 @@ async def _run_ranking_pipeline(
             ]
         else:
             ordered = sorted(candidates, key=lambda c: c.score or 0.0, reverse=True)
+
+        if feed_cfg.use_perspective:
+            async with timed(logger, "perspective_rerank", n_candidates=len(ordered)):
+                ordered = await perspective_rerank(ordered)
 
         final = mmr_rerank(ordered) if feed_cfg.diversify else ordered
         return [c.at_uri for c in final if c.at_uri]

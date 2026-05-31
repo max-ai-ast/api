@@ -165,3 +165,4 @@ class FeedConfig(BaseModel):
         description="When set, candidates are ranked by this model before being returned.",
     )
     diversify: bool = Field(True, description="When False, MMR reranking is skipped.")
+    use_perspective: bool = Field(True, description="When False, Perspective API reranking is skipped.")

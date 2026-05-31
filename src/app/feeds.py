@@ -39,6 +39,7 @@ FEEDS: dict[str, FeedConfig] = {
         internal_rkey="67-r",
         internal_display_name="67 R",
         diversify=False,
+        use_perspective=False,
         gen_request_template=CandidateGenerateRequest.model_construct(
             generators=[GeneratorSpec(name="random_posts", weight=1.0)],
             infill=None,
