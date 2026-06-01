@@ -520,54 +520,34 @@ async def get_feed_skeleton(
 
     feed_cache = _get_feed_cache(request)
 
-    # ------------------------------------------------------------------
-    # If the client sent a cursor, try to serve the next page from cache.
-    # ------------------------------------------------------------------
-    if cursor is not None:
-        try:
-            parsed = FeedCursor.decode(cursor)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid cursor")
+    async with timed(
+        logger,
+        "feed.render.duration_ms",
+        record_metric=True,
+        metric_attrs={"feed_name": feed_name},
+    ):
+        # ------------------------------------------------------------------
+        # If the client sent a cursor, try to serve the next page from cache.
+        # ------------------------------------------------------------------
+        if cursor is not None:
+            try:
+                parsed = FeedCursor.decode(cursor)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid cursor")
 
-        async with timed(logger, "feedcache_retrieve", cache_id=parsed.id):
-            cached_uris = await feed_cache.retrieve(parsed.id)
-        if cached_uris is not None:
-            if parsed.offset < len(cached_uris):
-                # Serve from the existing cached batch.
-                page = cached_uris[parsed.offset : parsed.offset + limit]
-                next_offset = parsed.offset + len(page)
-                next_cursor: str | None = None
-                if page:
-                    # Always return a cursor when there are results.
-                    # When next_offset reaches the end of the cache the
-                    # next request will fall into the regeneration branch
-                    # below, which fetches fresh candidates.
-                    next_cursor = FeedCursor(id=parsed.id, offset=next_offset).encode()
-                feed_context = _make_feed_context(user_did, feed_name, parsed.id)
-                return FeedSkeletonResponse(
-                    feed=_skeleton_items(page, feed_context),
-                    cursor=next_cursor,
-                )
-
-            # Offset is at or past the end — regenerate with exclusions.
-            batch = _batch_size(limit)
-            gen_request = feed_cfg.gen_request_template.model_copy(
-                update={
-                    "user_did": user_did,
-                    "num_candidates": batch,
-                    "exclude_uris": cached_uris,
-                }
-            )
-
-            new_uris = await _run_ranking_pipeline(feed_cfg, gen_request, request.app.state.es)
-            if new_uris:
-                async with timed(logger, "feedcache_append", cache_id=parsed.id):
-                    updated = await feed_cache.append(parsed.id, new_uris)
-                if updated is not None:
-                    page = new_uris[:limit]
+            async with timed(logger, "feedcache_retrieve", cache_id=parsed.id):
+                cached_uris = await feed_cache.retrieve(parsed.id)
+            if cached_uris is not None:
+                if parsed.offset < len(cached_uris):
+                    # Serve from the existing cached batch.
+                    page = cached_uris[parsed.offset : parsed.offset + limit]
                     next_offset = parsed.offset + len(page)
-                    next_cursor = None
-                    if len(page) == limit:
+                    next_cursor: str | None = None
+                    if page:
+                        # Always return a cursor when there are results.
+                        # When next_offset reaches the end of the cache the
+                        # next request will fall into the regeneration branch
+                        # below, which fetches fresh candidates.
                         next_cursor = FeedCursor(id=parsed.id, offset=next_offset).encode()
                     feed_context = _make_feed_context(user_did, feed_name, parsed.id)
                     return FeedSkeletonResponse(
@@ -575,41 +555,67 @@ async def get_feed_skeleton(
                         cursor=next_cursor,
                     )
 
-            # Append failed or nothing new — end of feed.
-            return FeedSkeletonResponse(feed=[])
+                # Offset is at or past the end — regenerate with exclusions.
+                batch = _batch_size(limit)
+                gen_request = feed_cfg.gen_request_template.model_copy(
+                    update={
+                        "user_did": user_did,
+                        "num_candidates": batch,
+                        "exclude_uris": cached_uris,
+                    }
+                )
 
-        # Cache miss (expired / evicted) — fall through to generate fresh.
+                new_uris = await _run_ranking_pipeline(feed_cfg, gen_request, request.app.state.es)
+                if new_uris:
+                    async with timed(logger, "feedcache_append", cache_id=parsed.id):
+                        updated = await feed_cache.append(parsed.id, new_uris)
+                    if updated is not None:
+                        page = new_uris[:limit]
+                        next_offset = parsed.offset + len(page)
+                        next_cursor = None
+                        if len(page) == limit:
+                            next_cursor = FeedCursor(id=parsed.id, offset=next_offset).encode()
+                        feed_context = _make_feed_context(user_did, feed_name, parsed.id)
+                        return FeedSkeletonResponse(
+                            feed=_skeleton_items(page, feed_context),
+                            cursor=next_cursor,
+                        )
 
-    # ------------------------------------------------------------------
-    # No cursor or cache miss — generate a fresh batch.
-    # ------------------------------------------------------------------
-    batch = _batch_size(limit)
-    gen_request = feed_cfg.gen_request_template.model_copy(
-        update={"user_did": user_did, "num_candidates": batch}
-    )
+                # Append failed or nothing new — end of feed.
+                return FeedSkeletonResponse(feed=[])
 
-    all_uris = await _run_ranking_pipeline(feed_cfg, gen_request, request.app.state.es)
+            # Cache miss (expired / evicted) — fall through to generate fresh.
 
-    # First page to return immediately.
-    page = all_uris[:limit]
+        # ------------------------------------------------------------------
+        # No cursor or cache miss — generate a fresh batch.
+        # ------------------------------------------------------------------
+        batch = _batch_size(limit)
+        gen_request = feed_cfg.gen_request_template.model_copy(
+            update={"user_did": user_did, "num_candidates": batch}
+        )
 
-    # Store the full batch and issue a cursor only when there are more pages.
-    # The request id identifies this response; when we cache a batch it doubles
-    # as the cache key so the served order can be recovered from interactions.
-    next_cursor = None
-    if len(all_uris) > limit:
-        request_id = uuid.uuid4().hex
-        async with timed(logger, "feedcache_store", cache_id=request_id):
-            await feed_cache.store(request_id, all_uris)
-        next_cursor = FeedCursor(id=request_id, offset=limit).encode()
-    else:
-        request_id = uuid.uuid4().hex
+        all_uris = await _run_ranking_pipeline(feed_cfg, gen_request, request.app.state.es)
 
-    feed_context = _make_feed_context(user_did, feed_name, request_id)
-    return FeedSkeletonResponse(
-        feed=_skeleton_items(page, feed_context),
-        cursor=next_cursor,
-    )
+        # First page to return immediately.
+        page = all_uris[:limit]
+
+        # Store the full batch and issue a cursor only when there are more pages.
+        # The request id identifies this response; when we cache a batch it doubles
+        # as the cache key so the served order can be recovered from interactions.
+        next_cursor = None
+        if len(all_uris) > limit:
+            request_id = uuid.uuid4().hex
+            async with timed(logger, "feedcache_store", cache_id=request_id):
+                await feed_cache.store(request_id, all_uris)
+            next_cursor = FeedCursor(id=request_id, offset=limit).encode()
+        else:
+            request_id = uuid.uuid4().hex
+
+        feed_context = _make_feed_context(user_did, feed_name, request_id)
+        return FeedSkeletonResponse(
+            feed=_skeleton_items(page, feed_context),
+            cursor=next_cursor,
+        )
 
 
 @router.post(

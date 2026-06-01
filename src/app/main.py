@@ -35,6 +35,7 @@ from .lib.es_client import SlowQueryLoggingES
 from .lib.feed_cache import FirestoreFeedCache
 from .lib.firestore import init_firestore_client
 from .lib.http_client import close_http_client, init_http_client
+from .lib.metrics import MetricCollector, set_metric_collector
 from .lib.profiling import install_profiling
 from .lib.request_context import reset_request_id, set_request_id
 
@@ -69,6 +70,13 @@ async def lifespan(app: FastAPI):
         request_timeout=20,
     )
 
+    metrics = MetricCollector(
+        service_name=os.environ.get("GE_SERVICE_NAME", "greenearth-api"),
+        env=os.environ.get("ENVIRONMENT", "local"),
+        export_interval_sec=int(os.environ.get("GE_METRICS_EXPORT_INTERVAL_SEC", "60")),
+    )
+    set_metric_collector(metrics)
+
     app.state.es = SlowQueryLoggingES(es)
     app.state.id_resolver = init_id_resolver()
     app.state.firestore = init_firestore_client()
@@ -89,6 +97,11 @@ async def lifespan(app: FastAPI):
             await close_http_client()
         except Exception:
             pass
+        try:
+            await metrics.shutdown()
+        except Exception:
+            pass
+        set_metric_collector(None)
 
 
 _DESCRIPTION = """\

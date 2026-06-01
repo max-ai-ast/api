@@ -354,6 +354,12 @@ create_service_account() {
         --role="roles/datastore.user" \
         --condition=None
 
+    # Cloud Monitoring metric writer - for custom metrics export via OTel
+    gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+        --member="serviceAccount:$sa_email" \
+        --role="roles/monitoring.metricWriter" \
+        --condition=None
+
     log_info "IAM roles granted successfully"
 }
 
