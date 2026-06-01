@@ -180,7 +180,7 @@ def test_rank_predict_maps_ranker_execution_error_to_502(monkeypatch):
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(rank_module.rank_predict(request, payload))
+        asyncio.run(rank_module.rank_predict(request, payload))  # pyright: ignore[reportArgumentType]
 
     assert exc_info.value.status_code == 502
     assert exc_info.value.detail == "Ranker 'two_tower' failed: downstream boom"
