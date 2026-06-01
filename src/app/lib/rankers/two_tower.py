@@ -205,13 +205,13 @@ class TwoTowerRanker(Ranker):
                 logger, "two_tower_post_side", n_candidates=len(candidates_by_uri)
             ):
                 # Use embeddings already carried on CandidatePost when available (avoids an ES round-trip).
-                candidate_embedding_pairs: list[tuple[str, list[float], str]] = []
+                uris_embs_authors: list[tuple[str, list[float], str]] = []
                 missing_uris: list[str] = []
                 for uri, candidate in candidates_by_uri.items():
                     if candidate.minilm_l12_embedding and candidate.author_did:
                         try:
                             vec = decode_float32_b64(candidate.minilm_l12_embedding)
-                            candidate_embedding_pairs.append((uri, vec, candidate.author_did))
+                            uris_embs_authors.append((uri, vec, candidate.author_did))
                             continue
                         except Exception:
                             pass
@@ -219,21 +219,21 @@ class TwoTowerRanker(Ranker):
 
                 if missing_uris:
                     fetched = await fetch_post_embeddings_and_authors(es, missing_uris)
-                    candidate_embedding_pairs.extend(fetched)
+                    uris_embs_authors.extend(fetched)
 
-                if not candidate_embedding_pairs:
+                if not uris_embs_authors:
                     return None
 
                 ranked_candidates_input = [
                     candidates_by_uri[at_uri]
-                    for at_uri, _, _ in candidate_embedding_pairs
+                    for at_uri, _, _ in uris_embs_authors
                     if at_uri in candidates_by_uri
                 ]
                 input_post_embeddings = [
-                    embedding for _, embedding, _ in candidate_embedding_pairs
+                    embedding for _, embedding, _ in uris_embs_authors
                 ]
                 author_dids = [
-                    author_did for _, _, author_did in candidate_embedding_pairs
+                    author_did for _, _, author_did in uris_embs_authors
                 ]
 
                 output_post_embeddings = await predict_post_tower_batch(

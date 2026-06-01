@@ -163,12 +163,11 @@ async def fetch_post_embeddings_and_authors(
         async with timed(logger, "es_post_embeddings", n_uris=len(at_uris)):
             query = {"terms": {"at_uri": at_uris}}
 
-            source_fields = ["at_uri", MINILM_L12_EMBEDDING_FIELD, "author_did"]
             resp = await es.search(
                 index="posts",
                 query=query,
                 size=len(at_uris),
-                _source=source_fields,
+                _source=["at_uri", MINILM_L12_EMBEDDING_FIELD, "author_did"],
             )
 
             data = unwrap_es_response(resp)
