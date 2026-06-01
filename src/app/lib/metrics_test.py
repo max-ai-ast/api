@@ -120,16 +120,14 @@ def test_same_instrument_reused_across_calls():
 
 
 # ---------------------------------------------------------------------------
-# Stdout fallback (no project_id)
+# Stdout fallback (non-deployed environment)
 # ---------------------------------------------------------------------------
 
-def test_stdout_fallback_when_no_project_id(capsys):
-    """When project_id is empty, MetricCollector should construct without error."""
+def test_stdout_fallback_for_local_env(capsys):
+    """Non-stage/prod environments should construct without error using stdout exporter."""
     collector = MetricCollector(
         service_name="test-svc",
-        env="test",
-        project_id="",
-        region="us-central1",
+        env="local",
         export_interval_sec=60,
     )
     collector.record("some.metric_ms", 1.0)

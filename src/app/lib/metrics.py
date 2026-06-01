@@ -1,8 +1,8 @@
 """OpenTelemetry-based metric collector for GCP Cloud Monitoring.
 
-When GE_GCP_PROJECT_ID is set, metrics are exported to GCP Cloud Monitoring
-under the prefix ``custom.googleapis.com/greenearth-api/``.  When it is empty
-the stdout exporter is used, which is useful for local development.
+When ``ENVIRONMENT`` is ``stage`` or ``prod``, metrics are exported to GCP
+Cloud Monitoring under the prefix ``custom.googleapis.com/greenearth-api/``.
+Otherwise the stdout exporter is used for local development.
 
 Instrument type is inferred from the metric name suffix:
   - ``_count`` → Int64Counter  (cumulative sum)
@@ -45,16 +45,13 @@ class MetricCollector:
         self,
         service_name: str,
         env: str,
-        project_id: str,
-        region: str,
         export_interval_sec: int,
     ) -> None:
-        if project_id:
+        if env in ("stage", "prod"):
             from opentelemetry.exporter.cloud_monitoring import (
                 CloudMonitoringMetricsExporter,
             )
             exporter = CloudMonitoringMetricsExporter(
-                project_id=project_id,
                 prefix="custom.googleapis.com/greenearth-api",
             )
         else:
