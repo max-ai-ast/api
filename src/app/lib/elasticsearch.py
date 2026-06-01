@@ -147,7 +147,14 @@ async def fetch_post_embeddings_and_authors(
     es,
     at_uris: list[str],
 ) -> list[tuple[str, list[float], str]]:
-    """
+    """Fetch MiniLM L12 embeddings for a list of post AT URIs, as well as their author DIDs.
+
+    Returns ``(at_uri, embedding, author_did)`` triples in the same order as ``at_uris``.
+    Posts without embeddings are silently skipped.
+    Posts without author DIDs are kept, with an empty string ("") author_did.
+
+    When a request cache is active the result is memoized so repeat
+    calls within the same request share a single ES round-trip.
     """
     if not at_uris:
         return []
@@ -184,8 +191,8 @@ async def fetch_post_embeddings_and_authors(
             ordered_embeddings: list[tuple[str, list[float], str]] = []
             for at_uri in at_uris:
                 vec = embeddings_by_uri.get(at_uri)
-                author_did = author_dids_by_uri.get(at_uri)
-                if vec and author_did:
+                author_did = author_dids_by_uri.get(at_uri, "")
+                if vec:
                     ordered_embeddings.append((at_uri, vec, author_did))
             return ordered_embeddings
 
