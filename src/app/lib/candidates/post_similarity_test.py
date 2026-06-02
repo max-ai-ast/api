@@ -462,6 +462,7 @@ class TestKnnSearchPosts:
                             "_source": {
                                 "at_uri": "at://post/1",
                                 "content": "original",
+                                "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.0, 1.0]},
                             },
                         },
                         {
@@ -470,6 +471,7 @@ class TestKnnSearchPosts:
                                 "at_uri": "at://post/2",
                                 "content": "reply",
                                 "thread_parent_post": "at://parent/x",
+                                "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.0, 1.0]},
                             },
                         },
                         {
@@ -477,6 +479,7 @@ class TestKnnSearchPosts:
                             "_source": {
                                 "at_uri": "at://post/3",
                                 "content": "another original",
+                                "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.0, 1.0]},
                             },
                         },
                     ]
@@ -492,9 +495,32 @@ class TestKnnSearchPosts:
             "posts_recent": {
                 "hits": {
                     "hits": [
-                        {"_score": 0.9, "_source": {"at_uri": "at://a", "contains_video": True}},
-                        {"_score": 0.8, "_source": {"at_uri": "at://b"}},
-                        {"_score": 0.7, "_source": {"at_uri": "at://c", "contains_video": True}},
+                        {
+                            "_score": 0.9,
+                            "_source": {
+                                "at_uri": "at://a",
+                                "content": "some content",
+                                "contains_video": True,
+                                "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.1, 0.2]},
+                            }
+                        },
+                        {
+                            "_score": 0.8,
+                            "_source": {
+                                "at_uri": "at://b",
+                                "content": "some content",
+                                "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.1, 0.2]},
+                            }
+                        },
+                        {
+                            "_score": 0.7,
+                            "_source": {
+                                "at_uri": "at://c",
+                                "content": "some content",
+                                "contains_video": True,
+                                "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.1, 0.2]},
+                            }
+                        },
                     ]
                 }
             }
@@ -519,7 +545,14 @@ class TestKnnSearchPosts:
             "posts_recent": {
                 "hits": {
                     "hits": [
-                        {"_score": 1.0 - i / 100, "_source": {"at_uri": f"at://p/{i}"}}
+                        {
+                            "_score": 1.0 - i / 100,
+                            "_source": {
+                                "at_uri": f"at://p/{i}",
+                                "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.1, 0.2]},
+                                "content": "some content",
+                            }
+                        }
                         for i in range(20)
                     ]
                 }
