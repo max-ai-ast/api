@@ -9,6 +9,7 @@ from ..candidates.post_similarity import (
     fetch_recent_liked_post_uris,
     knn_search_posts,
 )
+from ..candidates.utils import candidate_post_from_hit
 from ..elasticsearch import fetch_post_embeddings_and_authors
 from ..embeddings import MINILM_L12_EMBEDDING_FIELD, MINILM_L12_EMBEDDING_KEY
 
@@ -104,12 +105,14 @@ class TestFetchPostEmbeddings:
                         {
                             "_source": {
                                 "at_uri": "at://2",
+                                "content": "two",
                                 "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.3, 0.4]},
                             }
                         },
                         {
                             "_source": {
                                 "at_uri": "at://1",
+                                "content": "one",
                                 "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.1, 0.2]},
                             }
                         },
@@ -121,6 +124,11 @@ class TestFetchPostEmbeddings:
         assert vecs == [
             ("at://1", [0.1, 0.2]),
             ("at://2", [0.3, 0.4]),
+        ]
+        assert es.calls[0]["_source"] == [
+            "at_uri",
+            MINILM_L12_EMBEDDING_FIELD,
+            "content",
         ]
 
     @pytest.mark.asyncio
@@ -139,6 +147,7 @@ class TestFetchPostEmbeddings:
                         {
                             "_source": {
                                 "at_uri": "at://1",
+                                "content": "one",
                                 "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.1, 0.2]},
                             }
                         },
@@ -156,6 +165,37 @@ class TestFetchPostEmbeddings:
         vecs = await fetch_post_embeddings(es, ["at://1", "at://2", "at://3"])
         assert vecs == [("at://1", [0.1, 0.2])]
 
+    @pytest.mark.asyncio
+    async def test_skips_embeddings_without_source_text(self):
+        es = FakeEs(responses={
+            "posts": {
+                "hits": {
+                    "hits": [
+                        {
+                            "_source": {
+                                "at_uri": "at://1",
+                                "content": "one",
+                                "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.1, 0.2]},
+                            }
+                        },
+                        {
+                            "_source": {
+                                "at_uri": "at://2",
+                                "content": "   ",
+                                "media": [{"alt_text": ""}],
+                                "video_transcript": None,
+                                "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.3, 0.4]},
+                            }
+                        },
+                    ]
+                }
+            }
+        })
+        vecs = await fetch_post_embeddings(es, ["at://1", "at://2", "at://3"])
+        assert vecs == [
+            ("at://1", [0.1, 0.2]),
+        ]
+
 
 class TestFetchPostEmbeddingsAndAuthors:
     @pytest.mark.asyncio
@@ -168,6 +208,7 @@ class TestFetchPostEmbeddingsAndAuthors:
                             "_source": {
                                 "at_uri": "at://2",
                                 "author_did": "did:plc:two",
+                                "content": "two",
                                 "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.3, 0.4]},
                             }
                         },
@@ -175,6 +216,7 @@ class TestFetchPostEmbeddingsAndAuthors:
                             "_source": {
                                 "at_uri": "at://1",
                                 "author_did": "did:plc:one",
+                                "content": "one",
                                 "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.1, 0.2]},
                             }
                         },
@@ -191,6 +233,7 @@ class TestFetchPostEmbeddingsAndAuthors:
             "at_uri",
             MINILM_L12_EMBEDDING_FIELD,
             "author_did",
+            "content",
         ]
 
     @pytest.mark.asyncio
@@ -202,6 +245,7 @@ class TestFetchPostEmbeddingsAndAuthors:
                         {
                             "_source": {
                                 "at_uri": "at://1",
+                                "content": "one",
                                 "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.1, 0.2]},
                             }
                         },
@@ -209,6 +253,7 @@ class TestFetchPostEmbeddingsAndAuthors:
                             "_source": {
                                 "at_uri": "at://2",
                                 "author_did": 123,
+                                "content": "two",
                                 "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.3, 0.4]},
                             }
                         },
@@ -230,11 +275,66 @@ class TestFetchPostEmbeddingsAndAuthors:
         ]
 
     @pytest.mark.asyncio
+    async def test_skips_embeddings_without_source_text_even_with_author_did(self):
+        es = FakeEs(responses={
+            "posts": {
+                "hits": {
+                    "hits": [
+                        {
+                            "_source": {
+                                "at_uri": "at://1",
+                                "author_did": "did:plc:one",
+                                "content": "some content",
+                                "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.1, 0.2]},
+                            }
+                        },
+                        {
+                            "_source": {
+                                "at_uri": "at://2",
+                                "author_did": "did:plc:two",
+                                "content": "",
+                                "media": [{"alt_text": "   "}],
+                                "video_transcript": "",
+                                "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.3, 0.4]},
+                            }
+                        },
+                    ]
+                }
+            }
+        })
+        vecs = await fetch_post_embeddings_and_authors(es, ["at://1", "at://2"])
+        assert vecs == [("at://1", [0.1, 0.2], "did:plc:one")]
+
+    @pytest.mark.asyncio
     async def test_returns_empty_for_empty_input(self):
         es = FakeEs()
         vecs = await fetch_post_embeddings_and_authors(es, [])
         assert vecs == []
         assert len(es.calls) == 0
+
+
+class TestCandidatePostFromHit:
+    def test_keeps_embedding_with_content_source(self):
+        candidate = candidate_post_from_hit({
+            "_source": {
+                "at_uri": "at://post/1",
+                "content": "hello",
+                "embeddings": {MINILM_L12_EMBEDDING_KEY: SAMPLE_EMBEDDING},
+            }
+        })
+        assert candidate.minilm_l12_embedding is not None
+
+    def test_strips_embedding_without_nonblank_source_text(self):
+        candidate = candidate_post_from_hit({
+            "_source": {
+                "at_uri": "at://post/1",
+                "content": "   ",
+                "media": [{"alt_text": ""}, {"alt_text": "  "}, "bad"],
+                "video_transcript": 123,
+                "embeddings": {MINILM_L12_EMBEDDING_KEY: SAMPLE_EMBEDDING},
+            }
+        })
+        assert candidate.minilm_l12_embedding is None
 
 
 class TestAverageVectors:
@@ -463,12 +563,14 @@ class TestPostSimilarityGenerator:
                                     {
                                         "_source": {
                                             "at_uri": "at://post/2",
+                                            "content": "liked post two",
                                             "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.0, 1.0]},
                                         }
                                     },
                                     {
                                         "_source": {
                                             "at_uri": "at://post/1",
+                                            "content": "liked post one",
                                             "embeddings": {MINILM_L12_EMBEDDING_KEY: [1.0, 0.0]},
                                         }
                                     },

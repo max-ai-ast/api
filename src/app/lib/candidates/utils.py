@@ -1,5 +1,5 @@
 from ...models import CandidatePost
-from ..elasticsearch import unwrap_es_response
+from ..elasticsearch import post_has_embedding_source, unwrap_es_response
 from ..embeddings import MINILM_L12_EMBEDDING_KEY, encode_float32_b64
 
 
@@ -44,7 +44,7 @@ def candidate_post_from_hit(
     )
 
     encoded = None
-    if l12 is not None:
+    if l12 is not None and post_has_embedding_source(src):
         try:
             encoded = encode_float32_b64(l12)
         except Exception:
