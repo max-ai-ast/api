@@ -206,14 +206,12 @@ deploy_api_service() {
     # API uses the readonly key since it only needs read access to Elasticsearch
     local es_api_key_secret="elasticsearch-api-key-readonly"
     local inference_api_key_secret="inference-api-key-stage"
-    local api_key_secret="api-key"
     local firestore_api_key_secret="firestore-api-key-stage"
     local feed_context_secret="feed-context-secret-stage"
     local firestore_database="greenearth-stage"
     if [ "$ENVIRONMENT" = "prod" ]; then
         es_api_key_secret="elasticsearch-api-key-readonly-prod"
         inference_api_key_secret="inference-api-key-prod"
-        api_key_secret="api-key-prod"
         firestore_api_key_secret="firestore-api-key-prod"
         feed_context_secret="feed-context-secret-prod"
         firestore_database="greenearth-prod"
@@ -246,7 +244,6 @@ deploy_api_service() {
     # Add secrets with environment-specific names
     deploy_cmd="$deploy_cmd --set-secrets=GE_ELASTICSEARCH_API_KEY=$es_api_key_secret:latest"
     deploy_cmd="$deploy_cmd --set-secrets=GE_INFERENCE_API_KEY=$inference_api_key_secret:latest"
-    deploy_cmd="$deploy_cmd --set-secrets=API_KEY=$api_key_secret:latest"
     deploy_cmd="$deploy_cmd --set-secrets=GE_FIRESTORE_API_KEY=$firestore_api_key_secret:latest"
     deploy_cmd="$deploy_cmd --set-secrets=GE_FEED_CONTEXT_SECRET=$feed_context_secret:latest"
 
