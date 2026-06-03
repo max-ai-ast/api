@@ -20,6 +20,12 @@ def _make_collector(service_name: str = "test-svc", env: str = "test") -> tuple[
     return collector, reader
 
 
+def _get_metrics_data(reader: InMemoryMetricReader):
+    data = reader.get_metrics_data()
+    assert data is not None
+    return data
+
+
 def _collect_names_from_data(data) -> set[str]:
     names: set[str] = set()
     for rm in data.resource_metrics:
@@ -36,7 +42,7 @@ def _collect_names_from_data(data) -> set[str]:
 def test_counter_inferred_for_count_suffix():
     collector, reader = _make_collector()
     collector.record("requests_count", 5)
-    data = reader.get_metrics_data()
+    data = _get_metrics_data(reader)
     found = False
     for rm in data.resource_metrics:
         for sm in rm.scope_metrics:
@@ -51,7 +57,7 @@ def test_counter_inferred_for_count_suffix():
 def test_gauge_inferred_for_rate_suffix():
     collector, reader = _make_collector()
     collector.record("throughput_rate", 42.5)
-    data = reader.get_metrics_data()
+    data = _get_metrics_data(reader)
     found = False
     for rm in data.resource_metrics:
         for sm in rm.scope_metrics:
@@ -66,7 +72,7 @@ def test_gauge_inferred_for_rate_suffix():
 def test_histogram_inferred_for_ms_suffix():
     collector, reader = _make_collector()
     collector.record("feed.render.duration_ms", 123.4)
-    data = reader.get_metrics_data()
+    data = _get_metrics_data(reader)
     found = False
     for rm in data.resource_metrics:
         for sm in rm.scope_metrics:
@@ -81,7 +87,7 @@ def test_histogram_inferred_for_ms_suffix():
 def test_histogram_inferred_for_arbitrary_name():
     collector, reader = _make_collector()
     collector.record("something.latency", 99.0)
-    data = reader.get_metrics_data()
+    data = _get_metrics_data(reader)
     assert _collect_names_from_data(data) == {"something.latency"}
 
 
@@ -92,13 +98,14 @@ def test_histogram_inferred_for_arbitrary_name():
 def test_attributes_attached_to_histogram():
     collector, reader = _make_collector()
     collector.record("feed.render.duration_ms", 50.0, feed_name="nature")
-    data = reader.get_metrics_data()
+    data = _get_metrics_data(reader)
     for rm in data.resource_metrics:
         for sm in rm.scope_metrics:
             for metric in sm.metrics:
                 if metric.name == "feed.render.duration_ms":
                     dp = metric.data.data_points[0]
-                    assert dp.attributes.get("feed_name") == "nature"
+                    attrs = dp.attributes or {}
+                    assert attrs.get("feed_name") == "nature"
 
 
 # ---------------------------------------------------------------------------
@@ -109,11 +116,13 @@ def test_same_instrument_reused_across_calls():
     collector, reader = _make_collector()
     collector.record("feed.render.duration_ms", 10.0)
     collector.record("feed.render.duration_ms", 20.0)
-    data = reader.get_metrics_data()
+    data = _get_metrics_data(reader)
     for rm in data.resource_metrics:
         for sm in rm.scope_metrics:
             for metric in sm.metrics:
                 if metric.name == "feed.render.duration_ms":
+                    from opentelemetry.sdk.metrics._internal.point import Histogram
+                    assert isinstance(metric.data, Histogram)
                     # Both values should be in the same histogram
                     dp = metric.data.data_points[0]
                     assert dp.count == 2

@@ -14,6 +14,12 @@ def _make_collector() -> tuple[MetricCollector, InMemoryMetricReader]:
     return collector, reader
 
 
+def _get_metrics_data(reader: InMemoryMetricReader):
+    data = reader.get_metrics_data()
+    assert data is not None
+    return data
+
+
 @pytest.mark.asyncio
 async def test_records_metric_when_record_metric_true():
     collector, reader = _make_collector()
@@ -21,15 +27,13 @@ async def test_records_metric_when_record_metric_true():
     try:
         async with timed(logging.getLogger("test"), "op.duration_ms", record_metric=True):
             pass
-        data = reader.get_metrics_data()
-        names: set[str] = set()
-        if data is not None:
-            names = {
-                metric.name
-                for rm in data.resource_metrics
-                for sm in rm.scope_metrics
-                for metric in sm.metrics
-            }
+        data = _get_metrics_data(reader)
+        names = {
+            metric.name
+            for rm in data.resource_metrics
+            for sm in rm.scope_metrics
+            for metric in sm.metrics
+        }
         assert "op.duration_ms" in names
     finally:
         set_metric_collector(None)
@@ -83,7 +87,8 @@ async def test_metric_attrs_become_metric_labels():
                     for metric in sm.metrics:
                         if metric.name == "feed.render.duration_ms":
                             dp = metric.data.data_points[0]
-                            assert dp.attributes.get("feed_name") == "nature"
+                            attrs = dp.attributes or {}
+                            assert attrs.get("feed_name") == "nature"
                             found = True
         assert found
     finally:
@@ -111,6 +116,7 @@ async def test_extra_kwargs_not_in_metric_attrs():
                     for metric in sm.metrics:
                         if metric.name == "feed.render.duration_ms":
                             dp = metric.data.data_points[0]
-                            assert "count" not in dp.attributes
+                            attrs = dp.attributes or {}
+                            assert "count" not in attrs
     finally:
         set_metric_collector(None)
