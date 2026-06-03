@@ -103,6 +103,8 @@ async def authenticate_api_key(db: AsyncClient, full_key: str | None) -> ApiKeyD
     On success, atomically increments monthly_call_count and updates last_used_at.
     Resets the counter when the calendar month changes.
     """
+    if full_key is None:
+        return None
     key_id = parse_key_id(full_key)
     if key_id is None:
         return None
