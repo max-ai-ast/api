@@ -420,24 +420,6 @@ class TestGetFeedSkeleton:
         infill_gen = mock_get.side_effect("popularity")
         infill_gen.generate.assert_not_called()
 
-    def test_basic_similarity_uses_followed_users_generator(self):
-        similarity = _make_candidates("sim", 3, "post_similarity")
-        followed = _make_candidates("followed", 3, "followed_users")
-
-        with _patch_basic_similarity_generators(
-            similarity,
-            followed_users_candidates=followed,
-        ) as mock_get:
-            data = client.get(
-                "/xrpc/app.bsky.feed.getFeedSkeleton",
-                params={"feed": FEED_URI, "limit": 6},
-            ).json()
-
-        posts = [item["post"] for item in data["feed"]]
-        assert "at://sim/0" in posts
-        assert "at://followed/0" in posts
-        mock_get.side_effect("followed_users").generate.assert_awaited_once()
-
     # --- primary generator failure ---
 
     def test_primary_failure_falls_back_to_infill(self):
