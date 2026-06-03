@@ -214,7 +214,7 @@ class TestPublishFeed:
         record = put_call.kwargs["json"]["record"] if "json" in put_call.kwargs else put_call[1]["json"]["record"]
         assert record["$type"] == "app.bsky.feed.generator"
         assert record["did"] == GENERATOR_DID
-        assert record["displayName"] == "Unranked Your Feed"  # from FEEDS config
+        assert record["displayName"] == "Unranked YF"  # from FEEDS config
 
         captured = capsys.readouterr()
         assert "Published feed record:" in captured.out
@@ -294,7 +294,7 @@ class TestPublishFeed:
 
         put_call = client.post.call_args_list[1]
         record = put_call.kwargs["json"]["record"] if "json" in put_call.kwargs else put_call[1]["json"]["record"]
-        assert record["displayName"] == "GE Stg Unranked Your Feed"
+        assert record["displayName"] == "GE Stg Unranked YF"
 
 
 # ---------------------------------------------------------------------------

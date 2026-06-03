@@ -17,7 +17,7 @@ from .models import CandidateGenerateRequest, FeedConfig, GeneratorSpec, RankPre
 # NOTE: display_name is limited to 24 chars, including the prefix ("GreenEarth, GE Dev, or GE Stg")
 FEEDS: dict[str, FeedConfig] = {
     "unranked-your-feed": FeedConfig(
-        display_name="Unranked Your Feed",
+        display_name="Unranked YF",
         description="Development feed — post-similarity and followed-users candidate with popularity infill. No ranking.",
         internal_rkey="e2-uyf",
         internal_display_name="e2 UYF",
