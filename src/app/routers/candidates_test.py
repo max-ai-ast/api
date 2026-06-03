@@ -38,12 +38,14 @@ def fake_app_es():
                                 {
                                     "_source": {
                                         "at_uri": "at://post/2",
+                                        "content": "liked post two",
                                         "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.3, 0.4]},
                                     }
                                 },
                                 {
                                     "_source": {
                                         "at_uri": "at://post/1",
+                                        "content": "liked post one",
                                         "embeddings": {MINILM_L12_EMBEDDING_KEY: [0.1, 0.2]},
                                     }
                                 },
