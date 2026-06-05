@@ -14,31 +14,26 @@ logger = logging.getLogger(__name__)
 _PERSPECTIVE_URL = "https://commentanalyzer.googleapis.com/v1alpha1/comments:analyze"
 
 _REQUESTED_ATTRIBUTES = {
-    "COMPASSION": {},
-    "CURIOSITY": {},
-    "REASONING": {},
-    "MORAL_OUTRAGE": {},
-    "SCAPEGOATING": {},
-    "ALIENATION": {},
-    "INSULT": {},
+    "TOXICITY": {},
+    "SEVERE_TOXICITY": {},
     "IDENTITY_ATTACK": {},
-    "PERSUASION": {},
+    "INSULT": {},
 }
 
 
 def _prc_score(attr: dict[str, float]) -> float:
-    """Compute the PRC paper score from a flat dict of Perspective attribute scores.
+    """Score a post for re-ranking using public Perspective API attributes.
 
-    Formula (PRC paper tables S13/S14):
-        bridging     = avg(COMPASSION, CURIOSITY, REASONING)
-        correlated   = avg(MORAL_OUTRAGE, SCAPEGOATING, ALIENATION)
-        toxicity_sub = avg(INSULT, IDENTITY_ATTACK, correlated)
-        score        = bridging - 0.5 * PERSUASION - 0.5 * toxicity_sub
+    The PRC paper formula requires internal Jigsaw attributes (COMPASSION,
+    CURIOSITY, REASONING, etc.) that are not available via the public API.
+    This implementation uses only public production attributes to downrank
+    toxic content: score = -avg(TOXICITY, SEVERE_TOXICITY, IDENTITY_ATTACK, INSULT).
     """
-    bridging = (attr["COMPASSION"] + attr["CURIOSITY"] + attr["REASONING"]) / 3.0
-    correlated = (attr["MORAL_OUTRAGE"] + attr["SCAPEGOATING"] + attr["ALIENATION"]) / 3.0
-    toxicity_sub = (attr["INSULT"] + attr["IDENTITY_ATTACK"] + correlated) / 3.0
-    return bridging - 0.5 * attr["PERSUASION"] - 0.5 * toxicity_sub
+    toxicity = (
+        attr["TOXICITY"] + attr["SEVERE_TOXICITY"]
+        + attr["IDENTITY_ATTACK"] + attr["INSULT"]
+    ) / 4.0
+    return -toxicity
 
 
 class PerspectiveClient:
@@ -66,7 +61,14 @@ class PerspectiveClient:
             params={"key": self._api_key},
             json=payload,
         )
-        response.raise_for_status()
+        if not response.is_success:
+            logger.warning(
+                "Perspective API %s for content %.80r: %s",
+                response.status_code,
+                content,
+                response.text,
+            )
+            response.raise_for_status()
         data = response.json()
         attr_scores = {
             name: data["attributeScores"][name]["summaryScore"]["value"]
@@ -97,7 +99,7 @@ async def perspective_rerank(candidates: list[CandidatePost]) -> list[CandidateP
     client = _get_client()
 
     async def _score_one(c: CandidatePost) -> float:
-        if c.content is None:
+        if not c.content or not c.content.strip():
             return 0.0
         try:
             return await client.score(c.content)

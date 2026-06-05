@@ -24,51 +24,22 @@ def _make_candidate(uri: str, content: str | None = "text", score: float = 1.0) 
 
 class TestPrcScore:
     def test_all_zeros_returns_zero(self):
-        attr = {
-            "COMPASSION": 0.0, "CURIOSITY": 0.0, "REASONING": 0.0,
-            "MORAL_OUTRAGE": 0.0, "SCAPEGOATING": 0.0, "ALIENATION": 0.0,
-            "INSULT": 0.0, "IDENTITY_ATTACK": 0.0, "PERSUASION": 0.0,
-        }
+        attr = {"TOXICITY": 0.0, "SEVERE_TOXICITY": 0.0, "IDENTITY_ATTACK": 0.0, "INSULT": 0.0}
         assert _prc_score(attr) == pytest.approx(0.0)
 
-    def test_pure_bridging_returns_positive(self):
-        attr = {
-            "COMPASSION": 1.0, "CURIOSITY": 1.0, "REASONING": 1.0,
-            "MORAL_OUTRAGE": 0.0, "SCAPEGOATING": 0.0, "ALIENATION": 0.0,
-            "INSULT": 0.0, "IDENTITY_ATTACK": 0.0, "PERSUASION": 0.0,
-        }
-        # bridging=1.0, toxicity_sub=0.0, persuasion=0.0 → score=1.0
-        assert _prc_score(attr) == pytest.approx(1.0)
+    def test_full_toxicity_returns_negative_one(self):
+        attr = {"TOXICITY": 1.0, "SEVERE_TOXICITY": 1.0, "IDENTITY_ATTACK": 1.0, "INSULT": 1.0}
+        # avg=1.0 → score = -1.0
+        assert _prc_score(attr) == pytest.approx(-1.0)
 
-    def test_pure_toxicity_returns_negative(self):
-        attr = {
-            "COMPASSION": 0.0, "CURIOSITY": 0.0, "REASONING": 0.0,
-            "MORAL_OUTRAGE": 1.0, "SCAPEGOATING": 1.0, "ALIENATION": 1.0,
-            "INSULT": 1.0, "IDENTITY_ATTACK": 1.0, "PERSUASION": 0.0,
-        }
-        # bridging=0, correlated=1.0, toxicity_sub=(1+1+1)/3=1.0
-        # score = 0 - 0 - 0.5*1.0 = -0.5
-        assert _prc_score(attr) == pytest.approx(-0.5)
-
-    def test_persuasion_penalizes_score(self):
-        attr = {
-            "COMPASSION": 1.0, "CURIOSITY": 1.0, "REASONING": 1.0,
-            "MORAL_OUTRAGE": 0.0, "SCAPEGOATING": 0.0, "ALIENATION": 0.0,
-            "INSULT": 0.0, "IDENTITY_ATTACK": 0.0, "PERSUASION": 1.0,
-        }
-        # bridging=1.0, toxicity_sub=0.0, persuasion=1.0 → 1.0 - 0.5 - 0 = 0.5
-        assert _prc_score(attr) == pytest.approx(0.5)
+    def test_partial_toxicity_proportional(self):
+        attr = {"TOXICITY": 0.8, "SEVERE_TOXICITY": 0.0, "IDENTITY_ATTACK": 0.0, "INSULT": 0.0}
+        # avg = 0.8/4 = 0.2 → score = -0.2
+        assert _prc_score(attr) == pytest.approx(-0.2)
 
     def test_known_mixed_inputs(self):
-        attr = {
-            "COMPASSION": 0.6, "CURIOSITY": 0.3, "REASONING": 0.9,
-            "MORAL_OUTRAGE": 0.2, "SCAPEGOATING": 0.1, "ALIENATION": 0.3,
-            "INSULT": 0.4, "IDENTITY_ATTACK": 0.2, "PERSUASION": 0.5,
-        }
-        bridging = (0.6 + 0.3 + 0.9) / 3.0
-        correlated = (0.2 + 0.1 + 0.3) / 3.0
-        toxicity_sub = (0.4 + 0.2 + correlated) / 3.0
-        expected = bridging - 0.5 * 0.5 - 0.5 * toxicity_sub
+        attr = {"TOXICITY": 0.4, "SEVERE_TOXICITY": 0.2, "IDENTITY_ATTACK": 0.6, "INSULT": 0.8}
+        expected = -((0.4 + 0.2 + 0.6 + 0.8) / 4.0)
         assert _prc_score(attr) == pytest.approx(expected)
 
 
