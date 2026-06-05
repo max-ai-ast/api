@@ -485,6 +485,8 @@ def _feed_debug_doc() -> FeedDebugDocument:
             generators=[GeneratorSpec(name="post_similarity", weight=1.0)],
             user_did=USER_DID,
             num_candidates=10,
+            video_only=False,
+            infill=None,
         ),
         final_order=["at://p/1", "at://p/2"],
         generated_at=now,

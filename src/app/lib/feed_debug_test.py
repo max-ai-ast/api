@@ -25,6 +25,7 @@ def _request() -> CandidateGenerateRequest:
         generators=[GeneratorSpec(name="post_similarity", weight=1.0)],
         user_did="did:plc:user",
         num_candidates=10,
+        video_only=False,
         infill="popularity",
     )
 
@@ -119,7 +120,9 @@ class TestBuildDocument:
         long = "x" * (CONTENT_SNIPPET_MAX + 50)
         rec.record_final_candidates([_candidate("at://p/1", content=long)])
         doc = self._build(rec)
-        assert len(doc.final_candidates[0].content) == CONTENT_SNIPPET_MAX
+        content = doc.final_candidates[0].content
+        assert content is not None
+        assert len(content) == CONTENT_SNIPPET_MAX
 
     def test_stamps_author_usernames(self):
         doc = self._build(
