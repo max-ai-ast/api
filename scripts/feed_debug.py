@@ -12,6 +12,12 @@ Run from the api/ directory:
     pipenv run python scripts/feed_debug.py alice.bsky.social --list --limit 50
     pipenv run python scripts/feed_debug.py alice.bsky.social --show <request_id>
 
+Defaults to the local Firestore emulator (``--environment dev``). Target a
+deployed environment with ``--environment stage`` / ``--environment prod``
+(requires GCP credentials, e.g. ``gcloud auth application-default login``);
+``--env`` is accepted as an alias:
+    pipenv run python scripts/feed_debug.py alice.bsky.social --list --environment stage
+
 Reads Firestore connection from the same env vars as the API server:
     GE_FIRESTORE_PROJECT, GE_FIRESTORE_DATABASE, GE_FIRESTORE_EMULATOR_HOST
 """
@@ -43,6 +49,31 @@ from app.lib.firestore import (
 )
 
 console = Console()
+
+# GCP project + Firestore database per environment. Both environments live in
+# the same project and are separated by database (see scripts/gcp_setup.sh).
+GCP_PROJECT = "greenearth-471522"
+_ENVIRONMENTS = {
+    "stage": "greenearth-stage",
+    "prod": "greenearth-prod",
+}
+
+
+def _configure_environment(env: str) -> None:
+    """Point Firestore at the chosen environment, in-process.
+
+    ``dev`` (the default) leaves the environment untouched so the local
+    ``.env`` (Firestore emulator) is used. ``stage``/``prod`` set the project
+    and database explicitly and clear any emulator host — done here rather than
+    via shell env vars because ``pipenv`` loads ``.env`` over inline vars.
+    """
+    if env == "dev":
+        return
+    os.environ["GE_FIRESTORE_PROJECT"] = GCP_PROJECT
+    os.environ["GE_FIRESTORE_DATABASE"] = _ENVIRONMENTS[env]
+    os.environ.pop("GE_FIRESTORE_EMULATOR_HOST", None)
+    os.environ.pop("FIRESTORE_EMULATOR_HOST", None)
+    console.print(f"[dim]→ {env} (database {_ENVIRONMENTS[env]})[/dim]")
 
 
 async def _resolve_user_did(db, user: str) -> str | None:
@@ -358,8 +389,19 @@ def main() -> None:
     action.add_argument("--show", metavar="REQUEST_ID", help="Show one feed load in detail")
 
     parser.add_argument("--limit", type=int, default=20, help="Max rows for --list (default 20)")
+    parser.add_argument(
+        "--environment",
+        "--env",
+        dest="environment",
+        choices=["dev", "stage", "prod"],
+        default="dev",
+        help="Target environment: dev uses the local Firestore emulator (default); "
+        "stage/prod connect to the corresponding Firestore database",
+    )
 
     args = parser.parse_args()
+
+    _configure_environment(args.environment)
 
     if args.enable:
         asyncio.run(cmd_enable(args.user, True))

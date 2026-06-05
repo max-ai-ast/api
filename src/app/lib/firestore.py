@@ -11,7 +11,7 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 
-from google.cloud.firestore import ArrayUnion, AsyncClient, Query  # type: ignore[import-untyped]
+from google.cloud.firestore import ArrayUnion, AsyncClient, FieldFilter, Query  # type: ignore[import-untyped]
 
 from ..documents import (
     FeedActivityDocument,
@@ -124,7 +124,11 @@ async def get_user_by_username(db: AsyncClient, username: str) -> UserDocument |
     Usernames are not guaranteed unique over time (handles can be reused), so
     this returns the first match.
     """
-    query = db.collection(USERS_COLLECTION).where("username", "==", username).limit(1)
+    query = (
+        db.collection(USERS_COLLECTION)
+        .where(filter=FieldFilter("username", "==", username))
+        .limit(1)
+    )
     async for doc in query.stream():
         data = doc.to_dict()
         if data is not None:
