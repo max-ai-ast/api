@@ -61,6 +61,9 @@ class FeedDebugRecorder:
         self.ranking: "RankPredictResult | None" = None
         self.order_after_rank: list[str] = []
         self.final_order: list[str] = []
+        # (at_uri, relevance, score, author_penalty, content_penalty) in final
+        # selection order; populated only when diversification runs.
+        self.diversification: list[tuple[str, float, float, float, float]] = []
 
     # -- recording -------------------------------------------------------
 
@@ -87,6 +90,11 @@ class FeedDebugRecorder:
     def record_final_order(self, uris: list[str]) -> None:
         self.final_order = list(uris)
 
+    def record_diversification(self, entries: list[tuple[str, float, float, float, float]]) -> None:
+        """Record per-item diversification breakdown: (at_uri, relevance, score,
+        author_penalty, content_penalty) in final selection order."""
+        self.diversification = list(entries)
+
     # -- assembly --------------------------------------------------------
 
     def build_document(
@@ -103,7 +111,11 @@ class FeedDebugRecorder:
         """
         # Imported here (not at module top) to avoid an import cycle:
         # documents -> candidates.base -> ... -> feed_debug -> documents.
-        from ..documents import FeedDebugDocument, FeedDebugUserFeatures
+        from ..documents import (
+            FeedDebugDiversificationEntry,
+            FeedDebugDocument,
+            FeedDebugUserFeatures,
+        )
         from .candidates.base import CandidateResult
 
         if self.generate_request is None:
@@ -138,6 +150,16 @@ class FeedDebugRecorder:
             FeedDebugUserFeatures(source=source, liked_post_uris=uris, num_embeddings=n)
             for source, uris, n in self.user_features
         ]
+        diversification = [
+            FeedDebugDiversificationEntry(
+                at_uri=at_uri,
+                relevance=relevance,
+                score=score,
+                author_penalty=author_penalty,
+                content_penalty=content_penalty,
+            )
+            for at_uri, relevance, score, author_penalty, content_penalty in self.diversification
+        ]
 
         return FeedDebugDocument(
             request_id=request_id,
@@ -154,6 +176,7 @@ class FeedDebugRecorder:
             ranking=self.ranking,
             order_after_rank=self.order_after_rank,
             final_order=self.final_order,
+            diversification=diversification,
             generated_at=generated_at,
             expires_at=expires_at,
         )

@@ -58,6 +58,7 @@ router = APIRouter(tags=["xrpc"])
 # Configuration
 # ---------------------------------------------------------------------------
 
+
 def _get_service_did() -> str:
     """Return the DID of this feed generator service.
 
@@ -73,7 +74,7 @@ def _get_hostname() -> str:
     did = _get_service_did()
     # did:web:<hostname> → hostname
     if did.startswith("did:web:"):
-        return did[len("did:web:"):]
+        return did[len("did:web:") :]
     return "localhost"
 
 
@@ -110,6 +111,7 @@ async def _resolve_username(request: Request, user_did: str) -> str:
 # Response models
 # ---------------------------------------------------------------------------
 
+
 class FeedLink(BaseModel):
     uri: str = Field(..., description="AT URI of the feed")
 
@@ -134,6 +136,7 @@ class FeedSkeletonResponse(BaseModel):
     When ``cursor`` is ``None`` it is omitted from the JSON output — the
     AT Protocol spec requires the field to be absent rather than ``null``.
     """
+
     model_config = {"populate_by_name": True}
 
     feed: list[SkeletonItem] = Field(default_factory=list)
@@ -177,7 +180,9 @@ class Interaction(BaseModel):
     model_config = {"populate_by_name": True}
 
     item: str | None = Field(default=None, description="AT URI of the post interacted with")
-    event: str | None = Field(default=None, description="Interaction event type (app.bsky.feed.defs#...)")
+    event: str | None = Field(
+        default=None, description="Interaction event type (app.bsky.feed.defs#...)"
+    )
     feed_context: str | None = Field(
         default=None,
         validation_alias="feedContext",
@@ -198,9 +203,7 @@ class SendInteractionsResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-async def _hydrate_embeddings(
-    es, candidates: list[CandidatePost]
-) -> list[CandidatePost]:
+async def _hydrate_embeddings(es, candidates: list[CandidatePost]) -> list[CandidatePost]:
     """Fetch missing L12 embeddings in a single batched ES call.
 
     Candidate generators skip the embedding when reading from ES — the
@@ -210,9 +213,7 @@ async def _hydrate_embeddings(
     callers (e.g. the two-tower ranker re-asking for the same URIs)
     pay no additional ES cost.
     """
-    missing = [
-        c.at_uri for c in candidates if c.at_uri and not c.minilm_l12_embedding
-    ]
+    missing = [c.at_uri for c in candidates if c.at_uri and not c.minilm_l12_embedding]
     if not missing:
         return candidates
 
@@ -341,9 +342,7 @@ async def _run_pipeline_capturing(
     generated_at = datetime.now(timezone.utc)
     with feed_debug_scope(recorder):
         uris = await _run_ranking_pipeline(feed_cfg, gen_request, request.app.state.es)
-    _spawn_background(
-        _write_feed_debug(request, db, recorder, request_id, user_did, generated_at)
-    )
+    _spawn_background(_write_feed_debug(request, db, recorder, request_id, user_did, generated_at))
     return uris
 
 
@@ -483,8 +482,10 @@ async def _write_feed_debug(
 ) -> None:
     """Resolve author handles, assemble the debug document, and persist it.
 
-    Runs as a background task so handle resolution and the Firestore write stay
-    off the feed-serving hot path. Failures are logged, never surfaced.
+    This coroutine does the work but does *not* spawn its own task: the caller
+    (``_run_pipeline_capturing``) is responsible for running it via
+    ``_spawn_background`` so handle resolution and the Firestore write stay off
+    the feed-serving hot path. Failures are logged, never surfaced.
     """
     try:
         author_usernames = await _resolve_handles(request, recorder.author_dids())
@@ -561,6 +562,7 @@ async def _record_interactions(db, interactions: list["Interaction"]) -> None:
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("/.well-known/did.json", response_class=JSONResponse)
 async def well_known_did() -> JSONResponse:
     """Serve the DID document for ``did:web`` resolution.
@@ -585,6 +587,7 @@ async def well_known_did() -> JSONResponse:
         },
         media_type="application/json",
     )
+
 
 @router.get(
     "/xrpc/app.bsky.feed.describeFeedGenerator",

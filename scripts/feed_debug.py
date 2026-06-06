@@ -247,6 +247,7 @@ def _item_panel(
     generators_by_uri: dict,
     rank_by_uri: dict,
     after_rank_pos: dict,
+    div_by_uri: dict,
     meta: dict,
 ) -> Panel:
     c = meta.get(uri)
@@ -265,8 +266,8 @@ def _item_panel(
     # --- pipeline journey: retrieval → ranking → diversification ---
     # ``rank`` is the model's 1-based position with a model score; it only
     # exists when the feed has a ranker. ``order_after_rank`` is the order
-    # entering MMR — identical to ``rank`` when a ranker ran, so it's only
-    # worth showing in the no-ranker case (where it's the generator-score sort).
+    # entering diversification — identical to ``rank`` when a ranker ran, so it's
+    # only worth showing in the no-ranker case (where it's the generator-score sort).
     gens = generators_by_uri.get(uri, [])
     gen_str = ", ".join(f"{n} (gen {_fmt_score(s)})" for n, s in gens) or "infill/unknown"
     rank, rank_score = rank_by_uri.get(uri, (None, None))
@@ -285,10 +286,27 @@ def _item_panel(
     journey.append("  →  final ", style="dim")
     journey.append(f"#{pos}", style="bold green")
 
+    # --- diversification breakdown (only when diversification ran) ---
+    div = div_by_uri.get(uri)
+    diversify_line = None
+    if div is not None:
+        diversify_line = Text()
+        diversify_line.append("diversify    rel ", style="dim")
+        diversify_line.append(f"{div.relevance:.3f}", style="white")
+        diversify_line.append("   −author ", style="dim")
+        diversify_line.append(f"{div.author_penalty:.3f}", style="magenta")
+        diversify_line.append("   −content ", style="dim")
+        diversify_line.append(f"{div.content_penalty:.3f}", style="cyan")
+        diversify_line.append("   → score ", style="dim")
+        diversify_line.append(f"{div.score:.3f}", style="white")
+
     # --- content ---
     content = (getattr(c, "content", None) or "").replace("\n", " ") if c else ""
 
-    group_items = [journey, author_line]
+    group_items = [journey]
+    if diversify_line is not None:
+        group_items.append(diversify_line)
+    group_items.append(author_line)
     if content:
         group_items.append(Text(content, style="default"))
 
@@ -331,6 +349,7 @@ def _render_show(doc: FeedDebugDocument) -> None:
     }
     after_rank_pos = {uri: i for i, uri in enumerate(doc.order_after_rank)}
     final_pos = {uri: i for i, uri in enumerate(doc.final_order)}
+    div_by_uri = {e.at_uri: e for e in doc.diversification}
 
     # Candidate metadata: prefer the final (sanitized) candidate, else first seen.
     meta: dict[str, object] = {}
@@ -355,7 +374,9 @@ def _render_show(doc: FeedDebugDocument) -> None:
     console.print(f"[dim]journey: retrieved by generator (gen score) → {legend}[/dim]\n")
     for pos, uri in enumerate(doc.final_order):
         console.print(
-            _item_panel(uri, pos, total, generators_by_uri, rank_by_uri, after_rank_pos, meta)
+            _item_panel(
+                uri, pos, total, generators_by_uri, rank_by_uri, after_rank_pos, div_by_uri, meta
+            )
         )
 
     discarded = sorted(set(generators_by_uri) - set(final_pos))

@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from .candidates.base import CandidateResult
+from .diversify import mmr_rerank
+from .embeddings import encode_float32_b64
 from .feed_debug import (
     CONTENT_SNIPPET_MAX,
     FeedDebugRecorder,
@@ -131,6 +135,16 @@ class TestBuildDocument:
         )
         assert all(c.author_username == "alice.bsky.app" for c in doc.final_candidates)
 
+    def test_includes_diversification(self):
+        rec = self._recorder()
+        rec.record_diversification(
+            [("at://p/2", 0.9, 0.4, 0.3, 0.1), ("at://p/1", 1.0, 1.0, 0.0, 0.0)]
+        )
+        doc = self._build(rec)
+        assert [e.at_uri for e in doc.diversification] == ["at://p/2", "at://p/1"]
+        assert doc.diversification[0].author_penalty == 0.3
+        assert doc.diversification[0].content_penalty == 0.1
+
     def test_author_dids_union(self):
         rec = FeedDebugRecorder(feed_name="f", regenerated=False)
         rec.set_generate_request(_request())
@@ -142,3 +156,57 @@ class TestBuildDocument:
         )
         rec.record_final_candidates([_candidate("at://p/2", author="did:plc:b")])
         assert rec.author_dids() == {"did:plc:a", "did:plc:b"}
+
+
+class TestDiversificationCapture:
+    """Diversification records the relevance + author/content penalty split."""
+
+    def test_author_penalty_recorded(self):
+        # Same author, no embeddings -> penalty is purely author similarity.
+        a = CandidatePost(
+            at_uri="at://a", score=1.0, author_did="did:plc:same", minilm_l12_embedding=None
+        )
+        b = CandidatePost(
+            at_uri="at://b", score=0.5, author_did="did:plc:same", minilm_l12_embedding=None
+        )
+        rec = FeedDebugRecorder(feed_name="f", regenerated=False)
+        with feed_debug_scope(rec):
+            mmr_rerank([a, b])
+
+        assert [e[0] for e in rec.diversification] == ["at://a", "at://b"]
+        # First pick: selected on relevance alone, no penalty.
+        assert rec.diversification[0] == ("at://a", 1.0, 1.0, 0.0, 0.0)
+        # Second pick: author_penalty = BETA * AUTHOR_WEIGHT * 1 = 0.5 * 0.75.
+        _, rel, score, author_pen, content_pen = rec.diversification[1]
+        assert rel == pytest.approx(0.5)
+        assert author_pen == pytest.approx(0.375)
+        assert content_pen == pytest.approx(0.0)
+        assert score == pytest.approx(0.5 * 0.5 - 0.375)
+
+    def test_content_penalty_recorded(self):
+        # Different authors, identical embeddings -> penalty is purely content.
+        emb = encode_float32_b64([1.0, 0.0, 0.0])
+        a = CandidatePost(
+            at_uri="at://a", score=1.0, author_did="did:plc:x", minilm_l12_embedding=emb
+        )
+        b = CandidatePost(
+            at_uri="at://b", score=0.5, author_did="did:plc:y", minilm_l12_embedding=emb
+        )
+        rec = FeedDebugRecorder(feed_name="f", regenerated=False)
+        with feed_debug_scope(rec):
+            mmr_rerank([a, b])
+
+        _, _, _, author_pen, content_pen = rec.diversification[1]
+        # content_penalty = BETA * (1 - AUTHOR_WEIGHT) * cosine(=1) = 0.5 * 0.25.
+        assert author_pen == pytest.approx(0.0)
+        assert content_pen == pytest.approx(0.125)
+
+    def test_no_recording_without_recorder(self):
+        a = CandidatePost(
+            at_uri="at://a", score=1.0, author_did="did:plc:x", minilm_l12_embedding=None
+        )
+        b = CandidatePost(
+            at_uri="at://b", score=0.5, author_did="did:plc:x", minilm_l12_embedding=None
+        )
+        out = mmr_rerank([a, b])  # no active recorder -> must not raise
+        assert [c.at_uri for c in out] == ["at://a", "at://b"]
