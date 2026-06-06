@@ -11,6 +11,7 @@ import httpx
 
 from ..models import CandidatePost
 from .http_client import get_http_client
+from .telemetry import timed
 
 logger = logging.getLogger(__name__)
 
@@ -73,11 +74,12 @@ class PerspectiveClient:
             "requestedAttributes": _REQUESTED_ATTRIBUTES,
         }
         client = get_http_client()
-        response = await client.post(
-            _PERSPECTIVE_URL,
-            params={"key": self._api_key},
-            json=payload,
-        )
+        async with timed(logger, "perspective.score.duration_ms", record_metric=True):
+            response = await client.post(
+                _PERSPECTIVE_URL,
+                params={"key": self._api_key},
+                json=payload,
+            )
         if not response.is_success:
             logger.warning(
                 "Perspective API %s for content %.80r: %s",

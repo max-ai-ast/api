@@ -293,7 +293,12 @@ async def _run_ranking_pipeline(
             ordered = sorted(candidates, key=lambda c: c.score or 0.0, reverse=True)
 
         if feed_cfg.use_perspective:
-            async with timed(logger, "perspective_rerank", n_candidates=len(ordered)):
+            async with timed(
+                logger,
+                "perspective.rerank.duration_ms",
+                record_metric=True,
+                n_candidates=len(ordered),
+            ):
                 ordered = await perspective_rerank(ordered)
 
         final = mmr_rerank(ordered) if feed_cfg.diversify else ordered
