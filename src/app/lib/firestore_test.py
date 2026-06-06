@@ -28,6 +28,7 @@ from ..lib.firestore import (
     set_user_debug_flag,
     upsert_feed_activity,
     upsert_user,
+    user_doc_id,
     write_feed_debug,
 )
 
@@ -152,6 +153,28 @@ class TestInitFirestoreClient:
         init_firestore_client()
 
         MockAsyncClient.assert_called_once_with(project="demo-no-project", database="(default)")
+
+
+# ---------------------------------------------------------------------------
+# user_doc_id
+# ---------------------------------------------------------------------------
+
+
+class TestUserDocId:
+    def test_strips_did_plc_prefix(self):
+        assert user_doc_id("did:plc:testuser123") == "testuser123"
+
+    def test_passes_through_other_methods(self):
+        assert user_doc_id("did:web:example.com") == "did:web:example.com"
+
+    @pytest.mark.asyncio
+    async def test_user_doc_keyed_by_stripped_id(self):
+        db, collection_ref, doc_ref = _mock_firestore_client()
+        doc_ref.get.return_value = _mock_doc_snapshot(False)
+
+        await get_user(db, "did:plc:testuser123")
+
+        collection_ref.document.assert_called_with("testuser123")
 
 
 # ---------------------------------------------------------------------------
