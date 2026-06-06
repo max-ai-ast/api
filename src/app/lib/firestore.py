@@ -34,6 +34,18 @@ SEEN_POSTS_RETENTION_DAYS = 5
 # How long a feed-debug record lives before native Firestore TTL deletes it.
 FEED_DEBUG_RETENTION_DAYS = 7
 
+# Prefix stripped from a DID to form the user document ID. The full DID is
+# still stored in the document's ``user_did`` field; only the document *key* is
+# shortened. This keeps colons out of the key — colons in a document ID break
+# subcollection navigation in the Firestore emulator UI. All users are
+# currently did:plc; other DID methods are passed through unchanged.
+_USER_DID_PREFIX = "did:plc:"
+
+
+def user_doc_id(user_did: str) -> str:
+    """Map a DID to its Firestore user-document ID (colon-free for did:plc)."""
+    return user_did.removeprefix(_USER_DID_PREFIX)
+
 
 def init_firestore_client() -> AsyncClient:
     """Create an async Firestore client.
@@ -71,7 +83,7 @@ def init_firestore_client() -> AsyncClient:
 
 async def get_user(db: AsyncClient, user_did: str) -> UserDocument | None:
     """Fetch a user document by DID, or return ``None`` if not found."""
-    doc = await db.collection(USERS_COLLECTION).document(user_did).get()
+    doc = await db.collection(USERS_COLLECTION).document(user_doc_id(user_did)).get()
     if not doc.exists:
         return None
     data = doc.to_dict()
@@ -87,7 +99,7 @@ async def upsert_user(db: AsyncClient, user_did: str, username: str) -> UserDocu
     On subsequent visits ``last_seen_at`` is refreshed and ``username`` is
     updated if it changed.
     """
-    ref = db.collection(USERS_COLLECTION).document(user_did)
+    ref = db.collection(USERS_COLLECTION).document(user_doc_id(user_did))
     doc = await ref.get()
 
     now = datetime.now(timezone.utc)
@@ -142,7 +154,7 @@ async def set_user_debug_flag(db: AsyncClient, user_did: str, enabled: bool) -> 
     The user document must already exist (users are created on their first feed
     request); raises ``ValueError`` otherwise so the CLI can report it clearly.
     """
-    ref = db.collection(USERS_COLLECTION).document(user_did)
+    ref = db.collection(USERS_COLLECTION).document(user_doc_id(user_did))
     doc = await ref.get()
     if not doc.exists:
         raise ValueError(f"No user document for {user_did}")
@@ -158,7 +170,7 @@ async def get_feed_activity(db: AsyncClient, user_did: str, feed_name: str) -> F
     """Fetch a feed activity document, or return ``None`` if not found."""
     doc = await (
         db.collection(USERS_COLLECTION)
-        .document(user_did)
+        .document(user_doc_id(user_did))
         .collection(FEED_ACTIVITY_COLLECTION)
         .document(feed_name)
         .get()
@@ -180,7 +192,7 @@ async def upsert_feed_activity(db: AsyncClient, user_did: str, feed_name: str) -
     """
     ref = (
         db.collection(USERS_COLLECTION)
-        .document(user_did)
+        .document(user_doc_id(user_did))
         .collection(FEED_ACTIVITY_COLLECTION)
         .document(feed_name)
     )
@@ -244,7 +256,7 @@ async def record_seen_posts(db: AsyncClient, user_did: str, post_uris: list[str]
 
     ref = (
         db.collection(USERS_COLLECTION)
-        .document(user_did)
+        .document(user_doc_id(user_did))
         .collection(SEEN_POSTS_COLLECTION)
         .document(bucket_id)
     )
@@ -268,7 +280,7 @@ async def get_recent_seen_uris(
     now = datetime.now(timezone.utc)
     query = (
         db.collection(USERS_COLLECTION)
-        .document(user_did)
+        .document(user_doc_id(user_did))
         .collection(SEEN_POSTS_COLLECTION)
         .where("expires_at", ">", now)
     )
@@ -304,7 +316,7 @@ async def write_feed_debug(db: AsyncClient, doc: FeedDebugDocument) -> None:
     """
     ref = (
         db.collection(USERS_COLLECTION)
-        .document(doc.user_did)
+        .document(user_doc_id(doc.user_did))
         .collection(FEED_DEBUG_COLLECTION)
         .document(doc.request_id)
     )
@@ -317,7 +329,7 @@ async def get_recent_feed_debug(
     """Return a user's most recent feed-debug records, newest first."""
     query = (
         db.collection(USERS_COLLECTION)
-        .document(user_did)
+        .document(user_doc_id(user_did))
         .collection(FEED_DEBUG_COLLECTION)
         .order_by("generated_at", direction=Query.DESCENDING)
         .limit(limit)
@@ -336,7 +348,7 @@ async def get_feed_debug(
     """Fetch a single feed-debug record, or ``None`` if not found."""
     doc = await (
         db.collection(USERS_COLLECTION)
-        .document(user_did)
+        .document(user_doc_id(user_did))
         .collection(FEED_DEBUG_COLLECTION)
         .document(request_id)
         .get()
