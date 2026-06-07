@@ -186,34 +186,31 @@ ensure_firestore_database() {
     fi
 }
 
-ensure_feed_cache_ttl_policy() {
+# Enable a Firestore TTL policy on <collection-group>.expires_at.
+#
+# ``fields ttls update`` starts a long-running operation; without ``--async``
+# gcloud blocks and polls until it finishes — even when the policy is already
+# ACTIVE — so this step otherwise hangs for minutes per collection. We submit
+# asynchronously instead: the policy activates in the background (a deletion
+# policy has no urgency) and re-runs return immediately. stdout (the operation
+# resource) is suppressed; real errors still surface on stderr.
+ensure_ttl_policy() {
+    local collection_group="$1"
     local firestore_db
     firestore_db="$(get_firestore_database)"
 
-    log_info "Ensuring TTL policy on feed_cache.expires_at..."
-    gcloud firestore fields ttls update expires_at \
-        --collection-group=feed_cache \
+    log_info "Ensuring TTL policy on ${collection_group}.expires_at (async)..."
+    if gcloud firestore fields ttls update expires_at \
+        --collection-group="$collection_group" \
         --database="$firestore_db" \
         --project="$PROJECT_ID" \
         --enable-ttl \
-        --quiet 2>/dev/null \
-        && log_info "TTL policy enabled on feed_cache.expires_at" \
-        || log_warn "TTL policy may already exist or could not be updated (non-fatal)"
-}
-
-ensure_seen_posts_ttl_policy() {
-    local firestore_db
-    firestore_db="$(get_firestore_database)"
-
-    log_info "Ensuring TTL policy on seen_posts.expires_at..."
-    gcloud firestore fields ttls update expires_at \
-        --collection-group=seen_posts \
-        --database="$firestore_db" \
-        --project="$PROJECT_ID" \
-        --enable-ttl \
-        --quiet 2>/dev/null \
-        && log_info "TTL policy enabled on seen_posts.expires_at" \
-        || log_warn "TTL policy may already exist or could not be updated (non-fatal)"
+        --async \
+        --quiet >/dev/null; then
+        log_info "TTL policy update submitted for ${collection_group}.expires_at (activates in the background)"
+    else
+        log_warn "Could not submit TTL policy update for ${collection_group}.expires_at (non-fatal)"
+    fi
 }
 
 ensure_firestore_api_key_secret() {
@@ -603,8 +600,9 @@ main() {
     setup_gcp_project
     create_service_account
     ensure_firestore_database
-    ensure_feed_cache_ttl_policy
-    ensure_seen_posts_ttl_policy
+    ensure_ttl_policy feed_cache
+    ensure_ttl_policy seen_posts
+    ensure_ttl_policy feed_debug
     ensure_firestore_api_key_secret
     ensure_inference_api_key_secret_access
     ensure_feed_context_secret
