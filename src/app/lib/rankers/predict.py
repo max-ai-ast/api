@@ -115,7 +115,7 @@ async def run_predict(
             rec.record_model_scores(name, weight, normalized)
 
     total_weight = sum(weight for _name, weight, _ranker in resolved)
-    valid_candidates = [c for c in request.candidates if c.at_uri is not None]
+    valid_candidates = [(c, c.at_uri) for c in request.candidates if c.at_uri is not None]
 
     def _combined(at_uri: str) -> float:
         return sum(
@@ -125,17 +125,16 @@ async def run_predict(
 
     ranked = sorted(
         enumerate(valid_candidates),
-        key=lambda item: (-_combined(item[1].at_uri), item[0]),
+        key=lambda item: (-_combined(item[1][1]), item[0]),
     )
 
     rankings: list[RankedCandidate] = []
-    for rank_idx, (_, candidate) in enumerate(ranked, start=1):
-        assert candidate.at_uri is not None
+    for rank_idx, (_, (_candidate, at_uri)) in enumerate(ranked, start=1):
         rankings.append(
             RankedCandidate(
-                at_uri=candidate.at_uri,
+                at_uri=at_uri,
                 rank=rank_idx,
-                rank_score=_combined(candidate.at_uri),
+                rank_score=_combined(at_uri),
             )
         )
 

@@ -182,4 +182,8 @@ async def score_candidates(candidates: list[CandidatePost]) -> dict[str, float]:
 
     scorable = [c for c in candidates if c.at_uri]
     scores = await asyncio.gather(*(_score_one(c) for c in scorable))
-    return {c.at_uri: score for c, score in zip(scorable, scores, strict=True)}
+    return {
+        c.at_uri: score
+        for c, score in zip(scorable, scores, strict=True)
+        if c.at_uri is not None
+    }

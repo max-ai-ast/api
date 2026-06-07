@@ -34,25 +34,24 @@ class PerspectiveRanker(Ranker):
         user_did: str,
         candidates: list[CandidatePost],
     ) -> RankerResult:
-        valid_candidates = [c for c in candidates if c.at_uri is not None]
-        scores = await score_candidates(valid_candidates)
+        valid_candidates = [(c, c.at_uri) for c in candidates if c.at_uri is not None]
+        scores = await score_candidates([c for c, _at_uri in valid_candidates])
 
         ranked_candidates = sorted(
             enumerate(valid_candidates),
             key=lambda item: (
-                -scores.get(item[1].at_uri, 0.0),
+                -scores.get(item[1][1], 0.0),
                 item[0],
             ),
         )
 
         rankings: list[RankedCandidate] = []
-        for rank_idx, (_, candidate) in enumerate(ranked_candidates, start=1):
-            assert candidate.at_uri is not None
+        for rank_idx, (_, (_candidate, at_uri)) in enumerate(ranked_candidates, start=1):
             rankings.append(
                 RankedCandidate(
-                    at_uri=candidate.at_uri,
+                    at_uri=at_uri,
                     rank=rank_idx,
-                    rank_score=scores.get(candidate.at_uri, 0.0),
+                    rank_score=scores.get(at_uri, 0.0),
                 )
             )
 
