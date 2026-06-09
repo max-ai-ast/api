@@ -152,10 +152,9 @@ class TwoTowerRanker(Ranker):
 
     @property
     def score_bounds(self) -> tuple[float, float]:
-        # TODO: confirm with the modeling team whether the deployed two-tower
-        # checkpoint was trained with l2_normalize_embeddings=True (cosine
-        # similarity, mathematically bounded to [-1, 1]) or False (raw
-        # unbounded dot product). Assuming the former (bounded) for now.
+        # User tower and post tower each L2-normalize the output embeddings 
+        # (they sum to 1), so the dot product is in the range [-1,1]. 
+        # Said another way, the two tower performs cosine similarity.
         return (-1.0, 1.0)
 
     async def predict(

@@ -443,6 +443,32 @@ Other useful `publish_feed.py` flags:
 Open [bsky.app](https://bsky.app), log in as the dev account, and navigate to
 the Feeds tab to find and open the published feed.
 
+### Debugging Feeds
+
+Turn it on for your account like so:
+
+```bash
+pipenv run scripts/feed_debug.py [username].bsky.social --environment stage --enable
+```
+
+To see your pageloads:
+
+```bash
+pipenv run scripts/feed_debug.py [username].bsky.social --environment stage --list
+```
+
+To look at one:
+
+```bash
+pipenv run scripts/feed_debug.py [username].bsky.social --environment stage --show [id]
+```
+
+Please disable it when you're done, since it stores a bunch of data for you and it's a waste if you're not looking at it:
+
+```bash
+pipenv run scripts/feed_debug.py [username].bsky.social --environment stage --disable
+```
+
 ## Project Structure
 
 ```text
