@@ -29,20 +29,20 @@ class RankModelNotFoundError(Exception):
 def _normalize(
     raw: float | None,
     bounds: tuple[float, float],
-    default_score: float,
+    fallback_normalized_score: float,
 ) -> float:
     """Linearly map *raw* from *bounds* into [-1, 1], clamping the result.
 
     Missing scores (``None`` — e.g. a ranker couldn't score a candidate)
-    normalize to ``default_score`` (neutral), matching how individual rankers already
+    normalize to ``fallback_normalized_score`` (neutral), matching how individual rankers already
     treat unscoreable candidates. Degenerate bounds (``hi <= lo``) also
-    normalize to ``default_score`` to avoid division by zero.
+    normalize to ``fallback_normalized_score`` to avoid division by zero.
     """
     if raw is None:
-        return default_score
+        return fallback_normalized_score
     lo, hi = bounds
     if hi <= lo:
-        return default_score
+        return fallback_normalized_score
     normalized = 2.0 * (raw - lo) / (hi - lo) - 1.0
     return max(-1.0, min(1.0, normalized))
 
@@ -83,6 +83,9 @@ async def run_predict(
     candidate via a weighted average (weights normalized to sum to 1, so the
     combined score also stays within [-1, 1]). The final ordering is by
     combined score, descending, with ties broken by original candidate order.
+    If a candidate at_uri has no valid scores from any model, it is dropped.
+    If it has a score from at least one model but not the others, the median
+    (per-model results) is filled in for those missing scores.
     """
     if not request.candidates:
         raise RankerError("candidates list must not be empty")
@@ -109,7 +112,7 @@ async def run_predict(
     # loop through results once to calculate medians and get scores per candidate
     medians_by_model: dict[str, float] = {}  # {model_name: median_score}
     results_by_candidate: dict[str, dict[str, float]] = {}  # {uri: {model_name: score}}
-    models_with_valid_results: list[tuple[str, float, Ranker]] = []
+    models_with_valid_results: list[tuple[str, float, Ranker]] = [] # filtered version of resolved
     for (name, weight, ranker), result in zip(resolved, results):
         # all the valid uris with their scores from this ranker model
         raw_by_uri = {
