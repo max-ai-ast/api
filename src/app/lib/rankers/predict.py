@@ -151,21 +151,21 @@ async def run_predict(
                 normalized_by_model[model_name][uri] = normalized_score
 
     metric_collector = get_metric_collector()
-    if metric_collector:
+    if metric_collector and dropped_candidate_count > 0:
         metric_collector.record(
             "rank.predict.dropped_candidates_count",
             dropped_candidate_count,
         )
 
-    weights_by_model: dict[str, float] = {
-        name: weight
-        for name, weight, _ in models_with_valid_results
-    }
     if rec is not None:
-        for model_name, scores_dict in normalized_by_model.items():
-            rec.record_model_scores(model_name, weights_by_model[model_name], scores_dict)
+        for model_name, weight, _ in resolved:
+            rec.record_model_scores(
+                model_name,
+                weight,
+                normalized_by_model.get(model_name, {}),
+            )
 
-    total_weight = sum(weights_by_model.values())
+    total_weight = sum(weight for _name, weight, _ranker in models_with_valid_results)
 
     def _combined(at_uri: str) -> float:
         return sum(

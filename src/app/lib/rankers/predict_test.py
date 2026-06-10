@@ -277,6 +277,39 @@ def test_run_predict_ignores_ranker_with_no_valid_scores(monkeypatch):
     ]
 
 
+def test_run_predict_records_empty_model_scores_for_empty_ranker(monkeypatch):
+    """Feed debug includes configured rankers that had no valid scores."""
+    candidates = [
+        CandidatePost(at_uri="at://post/a", score=0.5),
+        CandidatePost(at_uri="at://post/b", score=0.5),
+    ]
+    rankers = {
+        "x": StubRanker("x", (0.0, 1.0), {"at://post/a": 1.0, "at://post/b": 0.0}),
+        "empty": StubRanker("empty", (0.0, 1.0), {}),
+    }
+    monkeypatch.setattr(predict_module, "get_ranker", lambda name: rankers[name])
+
+    rec = FeedDebugRecorder(feed_name="f", regenerated=False)
+    with feed_debug_scope(rec):
+        asyncio.run(
+            predict_module.run_predict(
+                _request(
+                    models=[
+                        RankModelSpec(name="x", weight=1.0),
+                        RankModelSpec(name="empty", weight=9.0),
+                    ],
+                    candidates=candidates,
+                ),
+                es=object(),
+            )
+        )
+
+    assert rec.model_scores == [
+        ("x", 1.0, {"at://post/a": pytest.approx(1.0), "at://post/b": pytest.approx(-1.0)}),
+        ("empty", 9.0, {}),
+    ]
+
+
 def test_run_predict_returns_empty_when_no_ranker_has_valid_scores(monkeypatch):
     candidates = [
         CandidatePost(at_uri="at://post/a", score=0.5),
