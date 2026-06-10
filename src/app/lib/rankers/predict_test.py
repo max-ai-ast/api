@@ -5,7 +5,13 @@ import asyncio
 import pytest
 from pydantic import ValidationError
 
-from ...models import CandidatePost, RankModelSpec, RankPredictRequest, RankPredictResult, RankedCandidate
+from ...models import (
+    CandidatePost,
+    RankedCandidate,
+    RankModelSpec,
+    RankPredictRequest,
+    RankPredictResult,
+)
 from ..feed_debug import FeedDebugRecorder, feed_debug_scope
 from . import predict as predict_module
 from .base import RankerExecutionError, RankerResult
@@ -14,10 +20,18 @@ from .base import RankerExecutionError, RankerResult
 class StubRanker:
     """A ranker that returns pre-configured raw scores keyed by `at_uri`."""
 
-    def __init__(self, name: str, bounds: tuple[float, float], scores: dict[str, float]):
+    def __init__(
+        self,
+        name: str,
+        bounds: tuple[float, float],
+        scores: dict[str, float],
+        *,
+        include_missing: bool = True,
+    ):
         self._name = name
         self._bounds = bounds
         self._scores = scores
+        self._include_missing = include_missing
 
     @property
     def name(self) -> str:
@@ -36,6 +50,7 @@ class StubRanker:
             )
             for idx, candidate in enumerate(candidates, start=1)
             if candidate.at_uri is not None
+            and (self._include_missing or candidate.at_uri in self._scores)
         ]
         return RankerResult(model=self.name, result=RankPredictResult(rankings=rankings))
 
@@ -129,14 +144,14 @@ def test_run_predict_normalizes_and_combines_with_weights(monkeypatch):
     ]
 
 
-def test_run_predict_treats_missing_scores_as_neutral(monkeypatch):
-    """A candidate a ranker didn't score normalizes to 0.0 (neutral) when combined."""
+def test_run_predict_drops_candidates_with_no_valid_scores(monkeypatch):
+    """Candidates with no valid score from any ranker are excluded."""
     candidates = [
         CandidatePost(at_uri="at://post/a", score=0.5),
         CandidatePost(at_uri="at://post/b", score=0.5),
     ]
     rankers = {
-        "x": StubRanker("x", (0.0, 1.0), {"at://post/a": 1.0}),  # "b" missing -> neutral
+        "x": StubRanker("x", (0.0, 1.0), {"at://post/a": 1.0}),
     }
     monkeypatch.setattr(predict_module, "get_ranker", lambda name: rankers[name])
 
@@ -149,7 +164,158 @@ def test_run_predict_treats_missing_scores_as_neutral(monkeypatch):
 
     assert [(r.at_uri, r.rank, r.rank_score) for r in result.rankings] == [
         ("at://post/a", 1, pytest.approx(1.0)),
+    ]
+
+
+def test_run_predict_uses_ranker_median_for_explicit_missing_score(monkeypatch):
+    """A valid candidate missing one ranker's score gets that ranker's median score."""
+    candidates = [
+        CandidatePost(at_uri="at://post/a", score=0.5),
+        CandidatePost(at_uri="at://post/b", score=0.5),
+        CandidatePost(at_uri="at://post/c", score=0.5),
+    ]
+    rankers = {
+        "x": StubRanker("x", (0.0, 10.0), {"at://post/a": 10.0, "at://post/c": 0.0}),
+        "y": StubRanker(
+            "y",
+            (-1.0, 1.0),
+            {"at://post/a": 0.0, "at://post/b": 0.0, "at://post/c": 0.0},
+        ),
+    }
+    monkeypatch.setattr(predict_module, "get_ranker", lambda name: rankers[name])
+
+    result = asyncio.run(
+        predict_module.run_predict(
+            _request(
+                models=[
+                    RankModelSpec(name="x", weight=3.0),
+                    RankModelSpec(name="y", weight=1.0),
+                ],
+                candidates=candidates,
+            ),
+            es=object(),
+        )
+    )
+
+    assert [(r.at_uri, r.rank, r.rank_score) for r in result.rankings] == [
+        ("at://post/a", 1, pytest.approx(0.75)),
         ("at://post/b", 2, pytest.approx(0.0)),
+        ("at://post/c", 3, pytest.approx(-0.75)),
+    ]
+
+
+def test_run_predict_uses_ranker_median_for_omitted_score(monkeypatch):
+    """Median fallback also applies when a ranker omits a still-valid candidate."""
+    candidates = [
+        CandidatePost(at_uri="at://post/a", score=0.5),
+        CandidatePost(at_uri="at://post/b", score=0.5),
+        CandidatePost(at_uri="at://post/c", score=0.5),
+    ]
+    rankers = {
+        "x": StubRanker(
+            "x",
+            (0.0, 10.0),
+            {"at://post/a": 10.0, "at://post/c": 0.0},
+            include_missing=False,
+        ),
+        "y": StubRanker(
+            "y",
+            (-1.0, 1.0),
+            {"at://post/a": 0.0, "at://post/b": 0.0, "at://post/c": 0.0},
+        ),
+    }
+    monkeypatch.setattr(predict_module, "get_ranker", lambda name: rankers[name])
+
+    result = asyncio.run(
+        predict_module.run_predict(
+            _request(
+                models=[
+                    RankModelSpec(name="x", weight=3.0),
+                    RankModelSpec(name="y", weight=1.0),
+                ],
+                candidates=candidates,
+            ),
+            es=object(),
+        )
+    )
+
+    assert [(r.at_uri, r.rank, r.rank_score) for r in result.rankings] == [
+        ("at://post/a", 1, pytest.approx(0.75)),
+        ("at://post/b", 2, pytest.approx(0.0)),
+        ("at://post/c", 3, pytest.approx(-0.75)),
+    ]
+
+
+def test_run_predict_ignores_ranker_with_no_valid_scores(monkeypatch):
+    """A ranker with no valid scores does not dilute weights or crash."""
+    candidates = [
+        CandidatePost(at_uri="at://post/a", score=0.5),
+        CandidatePost(at_uri="at://post/b", score=0.5),
+    ]
+    rankers = {
+        "x": StubRanker("x", (0.0, 1.0), {"at://post/a": 1.0, "at://post/b": 0.0}),
+        "empty": StubRanker("empty", (0.0, 1.0), {}),
+    }
+    monkeypatch.setattr(predict_module, "get_ranker", lambda name: rankers[name])
+
+    result = asyncio.run(
+        predict_module.run_predict(
+            _request(
+                models=[
+                    RankModelSpec(name="x", weight=1.0),
+                    RankModelSpec(name="empty", weight=9.0),
+                ],
+                candidates=candidates,
+            ),
+            es=object(),
+        )
+    )
+
+    assert [(r.at_uri, r.rank, r.rank_score) for r in result.rankings] == [
+        ("at://post/a", 1, pytest.approx(1.0)),
+        ("at://post/b", 2, pytest.approx(-1.0)),
+    ]
+
+
+def test_run_predict_returns_empty_when_no_ranker_has_valid_scores(monkeypatch):
+    candidates = [
+        CandidatePost(at_uri="at://post/a", score=0.5),
+        CandidatePost(at_uri="at://post/b", score=0.5),
+    ]
+    rankers = {
+        "empty": StubRanker("empty", (0.0, 1.0), {}),
+    }
+    monkeypatch.setattr(predict_module, "get_ranker", lambda name: rankers[name])
+
+    result = asyncio.run(
+        predict_module.run_predict(
+            _request(models=[RankModelSpec(name="empty", weight=1.0)], candidates=candidates),
+            es=object(),
+        )
+    )
+
+    assert result.rankings == []
+
+
+def test_run_predict_treats_zero_scores_as_valid(monkeypatch):
+    candidates = [
+        CandidatePost(at_uri="at://post/a", score=0.5),
+        CandidatePost(at_uri="at://post/b", score=0.5),
+    ]
+    rankers = {
+        "x": StubRanker("x", (-1.0, 1.0), {"at://post/a": 0.0}),
+    }
+    monkeypatch.setattr(predict_module, "get_ranker", lambda name: rankers[name])
+
+    result = asyncio.run(
+        predict_module.run_predict(
+            _request(models=[RankModelSpec(name="x", weight=1.0)], candidates=candidates),
+            es=object(),
+        )
+    )
+
+    assert [(r.at_uri, r.rank, r.rank_score) for r in result.rankings] == [
+        ("at://post/a", 1, pytest.approx(0.0)),
     ]
 
 
