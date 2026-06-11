@@ -369,7 +369,7 @@ class TestKnnSearchPosts:
                 }
             }
         })
-        candidates = await knn_search_posts(es, [0.1, 0.2], num_candidates=10)
+        candidates = await knn_search_posts(es, [0.1, 0.2], num_candidates=10, search_field=MINILM_L12_EMBEDDING_FIELD)
         assert len(candidates) == 1
         assert candidates[0].at_uri == "at://post/1"
         assert candidates[0].content == "hello"
@@ -402,8 +402,8 @@ class TestKnnSearchPosts:
                 }
             }
         })
-        candidates = await knn_search_posts(es, [0.1, 0.2], num_candidates=10)
-        assert len(candidates) == 2
+        candidates = await knn_search_posts(es, [0.1, 0.2], num_candidates=10, search_field=MINILM_L12_EMBEDDING_FIELD)
+        assert len(candidates) == 1
         assert candidates[0].at_uri == "at://post/1"
         assert candidates[1].at_uri == "at://post/2"
         assert candidates[1].minilm_l12_embedding is None
@@ -427,7 +427,8 @@ class TestKnnSearchPosts:
             }
         })
         candidates = await knn_search_posts(
-            es, [0.1, 0.2], num_candidates=5, generator_name="post_similarity"
+            es, [0.1, 0.2], num_candidates=5, search_field=MINILM_L12_EMBEDDING_FIELD,
+            generator_name="post_similarity"
         )
         assert candidates[0].generator_name == "post_similarity"
 
@@ -436,7 +437,7 @@ class TestKnnSearchPosts:
         """Reply exclusion is intentionally NOT sent to ES — it would force
         a brute-force fallback (~10x slower). We filter replies in Python."""
         es = FakeEs(responses={"posts_recent": {"hits": {"hits": []}}})
-        await knn_search_posts(es, [0.1, 0.2], num_candidates=5)
+        await knn_search_posts(es, [0.1, 0.2], num_candidates=5, search_field=MINILM_L12_EMBEDDING_FIELD)
         knn = es.calls[0]["knn"]
         assert es.calls[0]["query"] is None
         # No filter at all when there are no exclude_uris.
@@ -447,7 +448,8 @@ class TestKnnSearchPosts:
         """exclude_uris is bitmap-friendly and small, so it stays in ES."""
         es = FakeEs(responses={"posts_recent": {"hits": {"hits": []}}})
         await knn_search_posts(
-            es, [0.1, 0.2], num_candidates=5, exclude_uris=["at://a", "at://b"]
+            es, [0.1, 0.2], num_candidates=5, search_field=MINILM_L12_EMBEDDING_FIELD,
+            exclude_uris=["at://a", "at://b"]
         )
         knn = es.calls[0]["knn"]
         assert {"terms": {"at_uri": ["at://a", "at://b"]}} in knn["filter"]["bool"]["must_not"]
@@ -488,7 +490,7 @@ class TestKnnSearchPosts:
                 }
             }
         })
-        candidates = await knn_search_posts(es, [0.1, 0.2], num_candidates=10)
+        candidates = await knn_search_posts(es, [0.1, 0.2], num_candidates=10, search_field=MINILM_L12_EMBEDDING_FIELD)
         assert [c.at_uri for c in candidates] == ["at://post/1", "at://post/3"]
 
     @pytest.mark.asyncio
@@ -527,7 +529,10 @@ class TestKnnSearchPosts:
                 }
             }
         })
-        candidates = await knn_search_posts(es, [0.1, 0.2], num_candidates=10, video_only=True)
+        candidates = await knn_search_posts(
+            es, [0.1, 0.2], num_candidates=10,
+            search_field=MINILM_L12_EMBEDDING_FIELD, video_only=True
+        )
         assert [c.at_uri for c in candidates] == ["at://a", "at://c"]
 
     @pytest.mark.asyncio
@@ -535,7 +540,10 @@ class TestKnnSearchPosts:
         """We ask ES for several times num_candidates so Python-side
         reply/video filtering still leaves enough results."""
         es = FakeEs(responses={"posts_recent": {"hits": {"hits": []}}})
-        await knn_search_posts(es, [0.1, 0.2], num_candidates=10)
+        await knn_search_posts(
+            es, [0.1, 0.2], num_candidates=10,
+            search_field=MINILM_L12_EMBEDDING_FIELD
+        )
         call = es.calls[0]
         # OVERFETCH_MULTIPLIER * num_candidates with a floor of MIN_OVERFETCH.
         assert call["size"] >= 50
@@ -560,7 +568,9 @@ class TestKnnSearchPosts:
                 }
             }
         })
-        candidates = await knn_search_posts(es, [0.1, 0.2], num_candidates=5)
+        candidates = await knn_search_posts(
+            es, [0.1, 0.2], num_candidates=5, search_field=MINILM_L12_EMBEDDING_FIELD
+        )
         assert len(candidates) == 5
         assert [c.at_uri for c in candidates] == [f"at://p/{i}" for i in range(5)]
 
