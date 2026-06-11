@@ -1327,6 +1327,8 @@ class TestRankedFeed:
             ).json()
 
         mock_fetch.assert_awaited_once()
+        assert mock_fetch.await_args
+        assert mock_run.await_args
         assert mock_fetch.await_args.args[1] == ["at://p/0"]
         rank_req = mock_run.await_args.args[0]
         assert rank_req.candidates[0].minilm_l12_embedding == TEST_EMBEDDING
@@ -1351,6 +1353,7 @@ class TestRankedFeed:
                 params={"feed": RANKED_FEED_URI},
             ).json()
 
+        assert mock_run.await_args
         rank_req = mock_run.await_args.args[0]
         assert [c.at_uri for c in rank_req.candidates] == ["at://p/0"]
         assert [item["post"] for item in data["feed"]] == ["at://p/0"]
