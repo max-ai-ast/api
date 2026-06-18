@@ -45,6 +45,8 @@ class TwoTowerCandidateGenerator(CandidateGenerator):
         )
 
         post_tower_uuid = await get_cached_post_tower_uuid(inference_base_url, inference_api_key)
+        # None means /ready was valid but no post-tower model is configured.
+        # Malformed /ready responses raise before this point.
         if post_tower_uuid is None:
             logger.warning(
                 "Skipping two-tower candidates because post-tower is not configured",

@@ -17,6 +17,8 @@ from .http_client import get_http_client
 
 logger = logging.getLogger(__name__)
 
+# Keep the post-tower UUID fresh, but allow transient /ready failures to use
+# the last known UUID briefly instead of disabling two-tower candidates.
 _POST_TOWER_UUID_TTL_SEC = 300
 _POST_TOWER_UUID_STALE_GRACE_SEC = 3600
 _post_tower_uuid_cache: dict[tuple[str, str], tuple[str, float]] = {}
@@ -113,6 +115,8 @@ def _extract_post_tower_uuid_from_ready(payload: object) -> str | None:
         if model_type != "post-tower":
             continue
 
+        # A missing post-tower entry means "not configured"; a post-tower entry
+        # without a UUID means the /ready contract is broken.
         post_tower_uuid = model_dict.get("model_uuid")
         if not isinstance(post_tower_uuid, str) or not post_tower_uuid:
             raise InferenceResponseFormatError(
@@ -245,6 +249,8 @@ async def get_cached_post_tower_uuid(
             if now < expires_at + _POST_TOWER_UUID_STALE_GRACE_SEC:
                 stale_post_tower_uuid = post_tower_uuid
 
+        # Only refresh errors use the stale UUID. A successful /ready response
+        # with no post-tower should return None so callers stop using old UUIDs.
         try:
             post_tower_uuid = await get_post_tower_uuid(base_url, api_key)
         except Exception:
