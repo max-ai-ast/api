@@ -543,6 +543,57 @@ setup_bsky_secret() {
     fi
 }
 
+setup_feed_probe_cloud_scheduler() {
+    log_info "Setting up Cloud Scheduler feed probes for $ENVIRONMENT..."
+
+    # Resolve the Cloud Run service URL for this environment.
+    # Feed probes are direct unauthenticated HTTP GETs — no Cloud Run Job needed.
+    local service_url
+    service_url=$(gcloud run services describe "greenearth-api-$ENVIRONMENT" \
+        --region="$REGION" \
+        --project="$PROJECT_ID" \
+        --format="value(status.url)" 2>/dev/null)
+
+    if [ -z "$service_url" ]; then
+        log_warn "Could not resolve service URL for greenearth-api-$ENVIRONMENT — skipping feed probe scheduler setup"
+        log_warn "Deploy the API first, then re-run gcp_setup.sh"
+        return 0
+    fi
+
+    local generator_did="did:plc:wrmpulygwvuhjn2c3jbalgqj"
+    local schedule="* * * * *"
+    # All three public feeds (public=True in feeds.py)
+    local public_feeds=("random" "your-feed" "best-of-friends")
+
+    for feed_rkey in "${public_feeds[@]}"; do
+        local job_name="feed-probe-${feed_rkey}-${ENVIRONMENT}"
+        local uri="${service_url}/xrpc/app.bsky.feed.getFeedSkeleton?feed=at://${generator_did}/app.bsky.feed.generator/${feed_rkey}&limit=5"
+        local description="Per-minute feed probe for ${feed_rkey} (${ENVIRONMENT}) — latency signal in Cloud Monitoring"
+
+        log_info "Configuring feed probe: $job_name"
+
+        if ! gcloud scheduler jobs describe "$job_name" --location="$REGION" --project="$PROJECT_ID" > /dev/null 2>&1; then
+            gcloud scheduler jobs create http "$job_name" \
+                --location="$REGION" \
+                --project="$PROJECT_ID" \
+                --schedule="$schedule" \
+                --uri="$uri" \
+                --http-method=GET \
+                --description="$description"
+            log_info "Cloud Scheduler feed probe created: $job_name"
+        else
+            gcloud scheduler jobs update http "$job_name" \
+                --location="$REGION" \
+                --project="$PROJECT_ID" \
+                --schedule="$schedule" \
+                --uri="$uri" \
+                --http-method=GET \
+                --description="$description"
+            log_info "Cloud Scheduler feed probe updated: $job_name"
+        fi
+    done
+}
+
 check_vpc_connector() {
     log_info "Checking for VPC connector..."
 
@@ -621,6 +672,7 @@ main() {
     setup_bsky_secret
     setup_perspective_secret
     check_vpc_connector
+    setup_feed_probe_cloud_scheduler
 
     echo ""
     log_info "✓ GCP setup complete!"
@@ -630,6 +682,7 @@ main() {
     log_info "  2. Ensure inference domain mapping is set up (inference-stage/inference)"
     log_info "     via ../engagement-prediction/inference_service/gcp_setup.sh"
     log_info "  3. Run ./scripts/deploy.sh to deploy the API to Cloud Run"
+    log_info "  4. Feed probe schedulers: 3 jobs fire every minute to produce latency signal in Cloud Monitoring"
     echo ""
 }
 
