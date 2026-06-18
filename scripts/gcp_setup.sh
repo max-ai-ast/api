@@ -631,7 +631,7 @@ setup_feed_probe_cloud_scheduler() {
                 --schedule="$schedule" \
                 --uri="$uri" \
                 --http-method=GET \
-                --headers="X-Probe-Secret=$probe_secret_value" \
+                --update-headers="X-Probe-Secret=$probe_secret_value" \
                 --description="$description"
             log_info "Cloud Scheduler feed probe updated: $job_name"
         fi
