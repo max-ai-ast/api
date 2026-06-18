@@ -679,7 +679,8 @@ async def get_feed_skeleton(
         logger.error("Firestore client not initialized")
         raise HTTPException(status_code=500, detail="Firestore unavailable")
 
-    _spawn_background(_record_session(request, user_did, feed_name, db))
+    if user_did != "did:plc:probe":
+        _spawn_background(_record_session(request, user_did, feed_name, db))
 
     # Per-user opt-in: capture pipeline debugging info for this feed load. This
     # costs one extra Firestore read per request; fail-soft so a hiccup degrades
