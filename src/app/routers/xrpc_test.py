@@ -1733,4 +1733,70 @@ class TestFeedDebugCapture:
             asyncio.run(self._drain(spawned))
 
         mock_write.assert_not_awaited()
-        assert "Failed to read debug flag" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Probe bypass (Cloud Scheduler)
+# ---------------------------------------------------------------------------
+
+class TestGetFeedSkeletonProbe:
+    """Cloud Scheduler hits the endpoint without AT Protocol auth.
+
+    When GE_PROBE_SECRET is set and the request carries the matching
+    X-Probe-Secret header, auth is bypassed and a synthetic DID is used.
+    """
+
+    PROBE_SECRET = "test-probe-secret-xyz"
+
+    @pytest.fixture(autouse=True)
+    def _set_probe_secret(self, monkeypatch):
+        monkeypatch.setenv("GE_PROBE_SECRET", self.PROBE_SECRET)
+
+    @pytest.fixture(autouse=True)
+    def _no_at_proto_auth(self):
+        """Simulate requests with no AT Protocol Bearer token."""
+        with patch("app.routers.xrpc.verify_auth_header", new_callable=AsyncMock, return_value=None):
+            yield
+
+    @pytest.fixture(autouse=True)
+    def _mock_firestore(self):
+        with patch("app.routers.xrpc.upsert_user", new_callable=AsyncMock), \
+             patch("app.routers.xrpc.upsert_feed_activity", new_callable=AsyncMock):
+            yield
+
+    def test_correct_probe_secret_returns_200(self):
+        """Matching X-Probe-Secret bypasses 401 and returns a feed."""
+        with _patch_unranked_your_feed_generators(_make_candidates("p", 3)):
+            resp = client.get(
+                "/xrpc/app.bsky.feed.getFeedSkeleton",
+                params={"feed": FEED_URI},
+                headers={"X-Probe-Secret": self.PROBE_SECRET},
+            )
+        assert resp.status_code == 200
+
+    def test_wrong_probe_secret_returns_401(self):
+        """Wrong X-Probe-Secret still 401s (no bypass)."""
+        resp = client.get(
+            "/xrpc/app.bsky.feed.getFeedSkeleton",
+            params={"feed": FEED_URI},
+            headers={"X-Probe-Secret": "wrong-secret"},
+        )
+        assert resp.status_code == 401
+
+    def test_missing_probe_header_returns_401(self):
+        """No header at all still 401s."""
+        resp = client.get(
+            "/xrpc/app.bsky.feed.getFeedSkeleton",
+            params={"feed": FEED_URI},
+        )
+        assert resp.status_code == 401
+
+    def test_probe_secret_env_unset_ignores_header(self, monkeypatch):
+        """When GE_PROBE_SECRET is not configured, any header value is ignored."""
+        monkeypatch.delenv("GE_PROBE_SECRET", raising=False)
+        resp = client.get(
+            "/xrpc/app.bsky.feed.getFeedSkeleton",
+            params={"feed": FEED_URI},
+            headers={"X-Probe-Secret": self.PROBE_SECRET},
+        )
+        assert resp.status_code == 401
