@@ -162,6 +162,14 @@ get_feed_context_secret() {
     fi
 }
 
+get_probe_secret() {
+    if [ "$ENVIRONMENT" = "prod" ]; then
+        echo "probe-secret-prod"
+    else
+        echo "probe-secret-stage"
+    fi
+}
+
 get_perspective_api_key_secret() {
     if [ "$ENVIRONMENT" = "prod" ]; then
         echo "perspective-api-key-prod"
@@ -335,6 +343,29 @@ ensure_feed_context_secret() {
         --member="serviceAccount:$sa_email" \
         --role="roles/secretmanager.secretAccessor" \
         --condition=None > /dev/null 2>&1 || log_info "Service account already has access to $key_secret"
+}
+
+ensure_probe_secret() {
+    local sa_email="api-runner-$ENVIRONMENT@$PROJECT_ID.iam.gserviceaccount.com"
+    local probe_secret
+    probe_secret="$(get_probe_secret)"
+
+    log_info "Ensuring probe secret exists: $probe_secret"
+
+    if ! gcloud secrets describe "$probe_secret" --project="$PROJECT_ID" > /dev/null 2>&1; then
+        local value
+        value=$(openssl rand -hex 32)
+        echo -n "$value" | gcloud secrets create "$probe_secret" --data-file=- --project="$PROJECT_ID"
+        log_info "Probe secret created: $probe_secret"
+    else
+        log_info "Probe secret already exists: $probe_secret (preserving value)"
+    fi
+
+    gcloud secrets add-iam-policy-binding "$probe_secret" \
+        --member="serviceAccount:$sa_email" \
+        --role="roles/secretmanager.secretAccessor" \
+        --project="$PROJECT_ID" \
+        --condition=None > /dev/null 2>&1 || log_info "Service account already has access to $probe_secret"
 }
 
 create_service_account() {
@@ -560,6 +591,17 @@ setup_feed_probe_cloud_scheduler() {
         return 0
     fi
 
+    local probe_secret_name
+    probe_secret_name="$(get_probe_secret)"
+    local probe_secret_value
+    probe_secret_value=$(gcloud secrets versions access latest \
+        --secret="$probe_secret_name" --project="$PROJECT_ID" 2>/dev/null)
+
+    if [ -z "$probe_secret_value" ]; then
+        log_warn "Could not read probe secret $probe_secret_name — run ensure_probe_secret first"
+        return 0
+    fi
+
     local generator_did="did:plc:wrmpulygwvuhjn2c3jbalgqj"
     local schedule="* * * * *"
     # All three public feeds (public=True in feeds.py)
@@ -579,6 +621,7 @@ setup_feed_probe_cloud_scheduler() {
                 --schedule="$schedule" \
                 --uri="$uri" \
                 --http-method=GET \
+                --headers="X-Probe-Secret=$probe_secret_value" \
                 --description="$description"
             log_info "Cloud Scheduler feed probe created: $job_name"
         else
@@ -588,6 +631,7 @@ setup_feed_probe_cloud_scheduler() {
                 --schedule="$schedule" \
                 --uri="$uri" \
                 --http-method=GET \
+                --headers="X-Probe-Secret=$probe_secret_value" \
                 --description="$description"
             log_info "Cloud Scheduler feed probe updated: $job_name"
         fi
@@ -658,6 +702,7 @@ main() {
     ensure_firestore_api_key_secret
     ensure_inference_api_key_secret_access
     ensure_feed_context_secret
+    ensure_probe_secret
 
     # Fetch ES API key from K8s unless disabled or already provided
     if [ "$FETCH_ES_KEY" = true ] && [ -z "$GE_ELASTICSEARCH_API_KEY" ]; then
