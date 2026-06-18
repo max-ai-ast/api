@@ -8,7 +8,7 @@ import logging
 
 from .base import CandidateGenerator, CandidateResult
 from ..feed_debug import current_recorder
-from ..inference import get_inference_settings, compute_user_embedding, get_post_tower_uuid
+from ..inference import get_inference_settings, compute_user_embedding, get_cached_post_tower_uuid
 from .es_candidates import knn_search_posts
 from ..telemetry import timed
 from ..embeddings import GE_POST_EMBEDDING_FIELD
@@ -44,7 +44,7 @@ class TwoTowerCandidateGenerator(CandidateGenerator):
             get_inference_settings()
         )
 
-        post_tower_uuid = await get_post_tower_uuid(inference_base_url, inference_api_key)
+        post_tower_uuid = await get_cached_post_tower_uuid(inference_base_url, inference_api_key)
         if not post_tower_uuid:
             return CandidateResult(generator_name=self.name, candidates=[])
 

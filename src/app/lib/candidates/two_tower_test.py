@@ -14,6 +14,7 @@ from ..embeddings import GE_POST_EMBEDDING_FIELD
 
 GET_INFERENCE_SETTINGS = "app.lib.candidates.two_tower.get_inference_settings"
 COMPUTE_USER_EMBEDDING = "app.lib.candidates.two_tower.compute_user_embedding"
+GET_CACHED_POST_TOWER_UUID = "app.lib.candidates.two_tower.get_cached_post_tower_uuid"
 KNN_SEARCH_POSTS = "app.lib.candidates.two_tower.knn_search_posts"
 INFERENCE_SETTINGS = ("https://inference", "api-key")
 
@@ -54,6 +55,11 @@ class TestTwoTowerCandidateGenerator:
         with (
             patch(GET_INFERENCE_SETTINGS, return_value=INFERENCE_SETTINGS) as settings,
             patch(
+                GET_CACHED_POST_TOWER_UUID,
+                new_callable=AsyncMock,
+                return_value="post-tower-uuid",
+            ) as get_post_tower_uuid,
+            patch(
                 COMPUTE_USER_EMBEDDING,
                 new_callable=AsyncMock,
                 return_value=user_embedding,
@@ -73,6 +79,7 @@ class TestTwoTowerCandidateGenerator:
             )
 
         settings.assert_called_once_with()
+        get_post_tower_uuid.assert_awaited_once_with("https://inference", "api-key")
         compute_user_embedding.assert_awaited_once_with(
             "did:plc:user1",
             es,
@@ -88,6 +95,7 @@ class TestTwoTowerCandidateGenerator:
             generator_name=TWO_TOWER_GENERATOR_NAME,
             video_only=True,
             exclude_uris=["at://old/1", "at://old/2"],
+            ge_post_embedding_model_uuid="post-tower-uuid",
         )
         assert result.generator_name == TWO_TOWER_GENERATOR_NAME
         assert result.candidates == candidates
@@ -99,6 +107,11 @@ class TestTwoTowerCandidateGenerator:
 
         with (
             patch(GET_INFERENCE_SETTINGS, return_value=INFERENCE_SETTINGS),
+            patch(
+                GET_CACHED_POST_TOWER_UUID,
+                new_callable=AsyncMock,
+                return_value="post-tower-uuid",
+            ),
             patch(
                 COMPUTE_USER_EMBEDDING,
                 new_callable=AsyncMock,
@@ -120,6 +133,7 @@ class TestTwoTowerCandidateGenerator:
             generator_name=TWO_TOWER_GENERATOR_NAME,
             video_only=False,
             exclude_uris=None,
+            ge_post_embedding_model_uuid="post-tower-uuid",
         )
         assert result.generator_name == TWO_TOWER_GENERATOR_NAME
         assert result.candidates == []
@@ -131,6 +145,11 @@ class TestTwoTowerCandidateGenerator:
 
         with (
             patch(GET_INFERENCE_SETTINGS, return_value=INFERENCE_SETTINGS),
+            patch(
+                GET_CACHED_POST_TOWER_UUID,
+                new_callable=AsyncMock,
+                return_value="post-tower-uuid",
+            ),
             patch(
                 COMPUTE_USER_EMBEDDING,
                 new_callable=AsyncMock,
@@ -152,7 +171,34 @@ class TestTwoTowerCandidateGenerator:
             generator_name=TWO_TOWER_GENERATOR_NAME,
             video_only=False,
             exclude_uris=None,
+            ge_post_embedding_model_uuid="post-tower-uuid",
         )
+        assert result.candidates == []
+
+    @pytest.mark.asyncio
+    async def test_generate_returns_empty_when_post_tower_uuid_missing(self, generator):
+        with (
+            patch(GET_INFERENCE_SETTINGS, return_value=INFERENCE_SETTINGS),
+            patch(
+                GET_CACHED_POST_TOWER_UUID,
+                new_callable=AsyncMock,
+                return_value=None,
+            ) as get_post_tower_uuid,
+            patch(
+                COMPUTE_USER_EMBEDDING,
+                new_callable=AsyncMock,
+            ) as compute_user_embedding,
+            patch(
+                KNN_SEARCH_POSTS,
+                new_callable=AsyncMock,
+            ) as knn_search,
+        ):
+            result = await generator.generate(object(), "did:plc:user1")
+
+        get_post_tower_uuid.assert_awaited_once_with("https://inference", "api-key")
+        compute_user_embedding.assert_not_awaited()
+        knn_search.assert_not_awaited()
+        assert result.generator_name == TWO_TOWER_GENERATOR_NAME
         assert result.candidates == []
 
     @pytest.mark.asyncio
@@ -162,6 +208,10 @@ class TestTwoTowerCandidateGenerator:
                 GET_INFERENCE_SETTINGS,
                 side_effect=RuntimeError("missing inference settings"),
             ),
+            patch(
+                GET_CACHED_POST_TOWER_UUID,
+                new_callable=AsyncMock,
+            ) as get_post_tower_uuid,
             patch(
                 COMPUTE_USER_EMBEDDING,
                 new_callable=AsyncMock,
@@ -174,6 +224,7 @@ class TestTwoTowerCandidateGenerator:
             with pytest.raises(RuntimeError, match="missing inference settings"):
                 await generator.generate(object(), "did:plc:user1")
 
+        get_post_tower_uuid.assert_not_awaited()
         compute_user_embedding.assert_not_awaited()
         knn_search.assert_not_awaited()
 
@@ -181,6 +232,11 @@ class TestTwoTowerCandidateGenerator:
     async def test_generate_propagates_user_embedding_errors(self, generator):
         with (
             patch(GET_INFERENCE_SETTINGS, return_value=INFERENCE_SETTINGS),
+            patch(
+                GET_CACHED_POST_TOWER_UUID,
+                new_callable=AsyncMock,
+                return_value="post-tower-uuid",
+            ),
             patch(
                 COMPUTE_USER_EMBEDDING,
                 new_callable=AsyncMock,
@@ -202,6 +258,11 @@ class TestTwoTowerCandidateGenerator:
 
         with (
             patch(GET_INFERENCE_SETTINGS, return_value=INFERENCE_SETTINGS),
+            patch(
+                GET_CACHED_POST_TOWER_UUID,
+                new_callable=AsyncMock,
+                return_value="post-tower-uuid",
+            ),
             patch(
                 COMPUTE_USER_EMBEDDING,
                 new_callable=AsyncMock,

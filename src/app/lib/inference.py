@@ -4,8 +4,10 @@ Used for calling the engagement prediction models: the user and post
 towers of the two tower model, etc.
 """
 
+import asyncio
 import logging
 import os
+import time
 
 from .elasticsearch import fetch_recent_liked_post_uris, fetch_post_embeddings_and_authors
 from .feed_debug import current_recorder
@@ -14,6 +16,11 @@ from .request_context import get_request_id
 from .http_client import get_http_client
 
 logger = logging.getLogger(__name__)
+
+_POST_TOWER_UUID_TTL_SEC = 300
+_POST_TOWER_UUID_STALE_GRACE_SEC = 3600
+_post_tower_uuid_cache: dict[tuple[str, str], tuple[str, float]] = {}
+_post_tower_uuid_locks: dict[tuple[str, str], asyncio.Lock] = {}
 
 
 def build_inference_headers(api_key: str) -> dict[str, str]:
@@ -158,3 +165,51 @@ async def get_post_tower_uuid(
     except:
         pass
     return post_tower_uuid
+
+
+async def get_cached_post_tower_uuid(
+    base_url: str,
+    api_key: str,
+) -> str | None:
+    key = (base_url, api_key)
+    now = time.monotonic()
+    cached = _post_tower_uuid_cache.get(key)
+    if cached is not None:
+        post_tower_uuid, expires_at = cached
+        if now < expires_at:
+            return post_tower_uuid
+
+    lock = _post_tower_uuid_locks.setdefault(key, asyncio.Lock())
+    async with lock:
+        now = time.monotonic()
+        cached = _post_tower_uuid_cache.get(key)
+        stale_post_tower_uuid = None
+        if cached is not None:
+            post_tower_uuid, expires_at = cached
+            if now < expires_at:
+                return post_tower_uuid
+            if now < expires_at + _POST_TOWER_UUID_STALE_GRACE_SEC:
+                stale_post_tower_uuid = post_tower_uuid
+
+        try:
+            post_tower_uuid = await get_post_tower_uuid(base_url, api_key)
+        except Exception:
+            if stale_post_tower_uuid is not None:
+                logger.warning(
+                    "Using stale post tower UUID after ready refresh failed",
+                    exc_info=True,
+                )
+                return stale_post_tower_uuid
+            raise
+        if post_tower_uuid:
+            _post_tower_uuid_cache[key] = (
+                post_tower_uuid,
+                time.monotonic() + _POST_TOWER_UUID_TTL_SEC,
+            )
+            return post_tower_uuid
+        if stale_post_tower_uuid is not None:
+            logger.warning(
+                "Using stale post tower UUID because ready response did not include one",
+            )
+            return stale_post_tower_uuid
+        return post_tower_uuid
