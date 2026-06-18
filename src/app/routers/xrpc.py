@@ -12,6 +12,7 @@ See: https://docs.bsky.app/docs/starter-templates/custom-feeds
 """
 
 import asyncio
+import hmac
 import logging
 import os
 import time
@@ -656,7 +657,9 @@ async def get_feed_skeleton(
     # carries the matching X-Probe-Secret header, skip AT Protocol auth and
     # use a synthetic DID so the full pipeline runs and emits latency metrics.
     _probe_secret = os.environ.get("GE_PROBE_SECRET")
-    if _probe_secret and request.headers.get("X-Probe-Secret") == _probe_secret:
+    if _probe_secret and hmac.compare_digest(
+        request.headers.get("X-Probe-Secret", ""), _probe_secret
+    ):
         user_did = "did:plc:probe"
     else:
         user_did = await verify_auth_header(request, service_did=_get_service_did())
