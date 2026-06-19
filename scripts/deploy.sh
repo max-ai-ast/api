@@ -240,7 +240,7 @@ deploy_api_service() {
     deploy_cmd="$deploy_cmd --set-env-vars=GE_ELASTICSEARCH_VERIFY_SSL=false"
     deploy_cmd="$deploy_cmd --set-env-vars=GE_FIRESTORE_PROJECT=$PROJECT_ID"
     deploy_cmd="$deploy_cmd --set-env-vars=GE_FIRESTORE_DATABASE=$firestore_database"
-    deploy_cmd="$deploy_cmd --set-env-vars=GE_PROBE_USER_DID=did:plc:wrmpulygwvuhjn2c3jbalgqj"
+    deploy_cmd="$deploy_cmd --set-env-vars=GE_PROBE_USER_DID=did:plc:s4tl2ajfsnstzuxtegl7r33g"
 
     if [ -n "$GE_INFERENCE_BASE_URL" ]; then
         deploy_cmd="$deploy_cmd --set-env-vars=GE_INFERENCE_BASE_URL=$GE_INFERENCE_BASE_URL"
