@@ -12,6 +12,7 @@ See: https://docs.bsky.app/docs/starter-templates/custom-feeds
 """
 
 import asyncio
+import hmac
 import logging
 import os
 import time
@@ -652,20 +653,27 @@ async def get_feed_skeleton(
 
     feed_cfg = FEEDS[feed_name]
 
-    # Authenticate the requesting user via the AT Protocol inter-service JWT.
-    # A valid DID is required for this feed endpoint.
-    user_did = await verify_auth_header(request, service_did=_get_service_did())
+    # Cloud Scheduler probe bypass: if GE_PROBE_SECRET is set and the request
+    # carries the matching X-Probe-Secret header, skip AT Protocol auth and
+    # use the configured probe DID so the full pipeline runs and emits latency metrics.
+    _probe_secret = os.environ.get("GE_PROBE_SECRET")
+    if _probe_secret and hmac.compare_digest(
+        request.headers.get("X-Probe-Secret", ""), _probe_secret
+    ):
+        user_did = os.environ.get("GE_PROBE_USER_DID", "did:plc:s4tl2ajfsnstzuxtegl7r33g")
+    else:
+        user_did = await verify_auth_header(request, service_did=_get_service_did())
 
-    if not user_did:
-        if request.headers.get("Authorization"):
-            logger.warning("Auth header present but verification failed for feed %s", feed_name)
-        else:
-            logger.warning("No auth header present for feed %s", feed_name)
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication required",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        if not user_did:
+            if request.headers.get("Authorization"):
+                logger.warning("Auth header present but verification failed for feed %s", feed_name)
+            else:
+                logger.warning("No auth header present for feed %s", feed_name)
+            raise HTTPException(
+                status_code=401,
+                detail="Authentication required",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
     # Record authenticated users in Firestore for backend analytics. Runs in
     # the background since this isn't essential for serving.

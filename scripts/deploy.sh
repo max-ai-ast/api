@@ -208,6 +208,7 @@ deploy_api_service() {
     local inference_api_key_secret="inference-api-key-stage"
     local firestore_api_key_secret="firestore-api-key-stage"
     local feed_context_secret="feed-context-secret-stage"
+    local probe_secret="probe-secret-stage"
     local perspective_api_key_secret="perspective-api-key-stage"
     local firestore_database="greenearth-stage"
     if [ "$ENVIRONMENT" = "prod" ]; then
@@ -215,6 +216,7 @@ deploy_api_service() {
         inference_api_key_secret="inference-api-key-prod"
         firestore_api_key_secret="firestore-api-key-prod"
         feed_context_secret="feed-context-secret-prod"
+        probe_secret="probe-secret-prod"
         perspective_api_key_secret="perspective-api-key-prod"
         firestore_database="greenearth-prod"
     fi
@@ -238,6 +240,7 @@ deploy_api_service() {
     deploy_cmd="$deploy_cmd --set-env-vars=GE_ELASTICSEARCH_VERIFY_SSL=false"
     deploy_cmd="$deploy_cmd --set-env-vars=GE_FIRESTORE_PROJECT=$PROJECT_ID"
     deploy_cmd="$deploy_cmd --set-env-vars=GE_FIRESTORE_DATABASE=$firestore_database"
+    deploy_cmd="$deploy_cmd --set-env-vars=GE_PROBE_USER_DID=did:plc:wrmpulygwvuhjn2c3jbalgqj"
 
     if [ -n "$GE_INFERENCE_BASE_URL" ]; then
         deploy_cmd="$deploy_cmd --set-env-vars=GE_INFERENCE_BASE_URL=$GE_INFERENCE_BASE_URL"
@@ -248,6 +251,7 @@ deploy_api_service() {
     deploy_cmd="$deploy_cmd --set-secrets=GE_INFERENCE_API_KEY=$inference_api_key_secret:latest"
     deploy_cmd="$deploy_cmd --set-secrets=GE_FIRESTORE_API_KEY=$firestore_api_key_secret:latest"
     deploy_cmd="$deploy_cmd --set-secrets=GE_FEED_CONTEXT_SECRET=$feed_context_secret:latest"
+    deploy_cmd="$deploy_cmd --set-secrets=GE_PROBE_SECRET=$probe_secret:latest"
     deploy_cmd="$deploy_cmd --set-secrets=GE_PERSPECTIVE_API_KEY=$perspective_api_key_secret:latest"
 
     # Resource and scaling configuration

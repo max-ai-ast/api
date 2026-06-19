@@ -116,7 +116,8 @@ setup_gcp_project() {
         apikeys.googleapis.com \
         secretmanager.googleapis.com \
         vpcaccess.googleapis.com \
-        compute.googleapis.com
+        compute.googleapis.com \
+        cloudscheduler.googleapis.com
 
     log_info "GCP APIs enabled successfully"
 }
@@ -158,6 +159,14 @@ get_feed_context_secret() {
         echo "feed-context-secret-prod"
     else
         echo "feed-context-secret-stage"
+    fi
+}
+
+get_probe_secret() {
+    if [ "$ENVIRONMENT" = "prod" ]; then
+        echo "probe-secret-prod"
+    else
+        echo "probe-secret-stage"
     fi
 }
 
@@ -334,6 +343,29 @@ ensure_feed_context_secret() {
         --member="serviceAccount:$sa_email" \
         --role="roles/secretmanager.secretAccessor" \
         --condition=None > /dev/null 2>&1 || log_info "Service account already has access to $key_secret"
+}
+
+ensure_probe_secret() {
+    local sa_email="api-runner-$ENVIRONMENT@$PROJECT_ID.iam.gserviceaccount.com"
+    local probe_secret
+    probe_secret="$(get_probe_secret)"
+
+    log_info "Ensuring probe secret exists: $probe_secret"
+
+    if ! gcloud secrets describe "$probe_secret" --project="$PROJECT_ID" > /dev/null 2>&1; then
+        local value
+        value=$(openssl rand -hex 32)
+        echo -n "$value" | gcloud secrets create "$probe_secret" --data-file=- --project="$PROJECT_ID"
+        log_info "Probe secret created: $probe_secret"
+    else
+        log_info "Probe secret already exists: $probe_secret (preserving value)"
+    fi
+
+    gcloud secrets add-iam-policy-binding "$probe_secret" \
+        --member="serviceAccount:$sa_email" \
+        --role="roles/secretmanager.secretAccessor" \
+        --project="$PROJECT_ID" \
+        --condition=None > /dev/null 2>&1 || log_info "Service account already has access to $probe_secret"
 }
 
 create_service_account() {
@@ -542,6 +574,70 @@ setup_bsky_secret() {
     fi
 }
 
+setup_feed_probe_cloud_scheduler() {
+    log_info "Setting up Cloud Scheduler feed probes for $ENVIRONMENT..."
+
+    # Resolve the Cloud Run service URL for this environment.
+    # Feed probes are direct unauthenticated HTTP GETs — no Cloud Run Job needed.
+    local service_url
+    service_url=$(gcloud run services describe "greenearth-api-$ENVIRONMENT" \
+        --region="$REGION" \
+        --project="$PROJECT_ID" \
+        --format="value(status.url)" 2>/dev/null)
+
+    if [ -z "$service_url" ]; then
+        log_warn "Could not resolve service URL for greenearth-api-$ENVIRONMENT — skipping feed probe scheduler setup"
+        log_warn "Deploy the API first, then re-run gcp_setup.sh"
+        return 0
+    fi
+
+    local probe_secret_name
+    probe_secret_name="$(get_probe_secret)"
+    local probe_secret_value
+    probe_secret_value=$(gcloud secrets versions access latest \
+        --secret="$probe_secret_name" --project="$PROJECT_ID" 2>/dev/null)
+
+    if [ -z "$probe_secret_value" ]; then
+        log_warn "Could not read probe secret $probe_secret_name — run ensure_probe_secret first"
+        return 0
+    fi
+
+    local generator_did="did:plc:wrmpulygwvuhjn2c3jbalgqj"
+    local schedule="* * * * *"
+    # All three public feeds (public=True in feeds.py)
+    local public_feeds=("random" "your-feed" "best-of-friends")
+
+    for feed_rkey in "${public_feeds[@]}"; do
+        local job_name="feed-probe-${feed_rkey}-${ENVIRONMENT}"
+        local uri="${service_url}/xrpc/app.bsky.feed.getFeedSkeleton?feed=at://${generator_did}/app.bsky.feed.generator/${feed_rkey}&limit=30"
+        local description="Per-minute feed probe for ${feed_rkey} (${ENVIRONMENT}) — latency signal in Cloud Monitoring"
+
+        log_info "Configuring feed probe: $job_name"
+
+        if ! gcloud scheduler jobs describe "$job_name" --location="$REGION" --project="$PROJECT_ID" > /dev/null 2>&1; then
+            gcloud scheduler jobs create http "$job_name" \
+                --location="$REGION" \
+                --project="$PROJECT_ID" \
+                --schedule="$schedule" \
+                --uri="$uri" \
+                --http-method=GET \
+                --headers="X-Probe-Secret=$probe_secret_value" \
+                --description="$description"
+            log_info "Cloud Scheduler feed probe created: $job_name"
+        else
+            gcloud scheduler jobs update http "$job_name" \
+                --location="$REGION" \
+                --project="$PROJECT_ID" \
+                --schedule="$schedule" \
+                --uri="$uri" \
+                --http-method=GET \
+                --update-headers="X-Probe-Secret=$probe_secret_value" \
+                --description="$description"
+            log_info "Cloud Scheduler feed probe updated: $job_name"
+        fi
+    done
+}
+
 check_vpc_connector() {
     log_info "Checking for VPC connector..."
 
@@ -606,6 +702,7 @@ main() {
     ensure_firestore_api_key_secret
     ensure_inference_api_key_secret_access
     ensure_feed_context_secret
+    ensure_probe_secret
 
     # Fetch ES API key from K8s unless disabled or already provided
     if [ "$FETCH_ES_KEY" = true ] && [ -z "$GE_ELASTICSEARCH_API_KEY" ]; then
@@ -620,6 +717,7 @@ main() {
     setup_bsky_secret
     setup_perspective_secret
     check_vpc_connector
+    setup_feed_probe_cloud_scheduler
 
     echo ""
     log_info "✓ GCP setup complete!"
@@ -629,6 +727,7 @@ main() {
     log_info "  2. Ensure inference domain mapping is set up (inference-stage/inference)"
     log_info "     via ../engagement-prediction/inference_service/gcp_setup.sh"
     log_info "  3. Run ./scripts/deploy.sh to deploy the API to Cloud Run"
+    log_info "  4. Feed probe schedulers: 3 jobs fire every minute to produce latency signal in Cloud Monitoring"
     echo ""
 }
 
