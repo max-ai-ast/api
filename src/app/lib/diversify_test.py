@@ -3,8 +3,16 @@
 import pytest
 
 from ..models import CandidatePost
-from .diversify import AUTHOR_WEIGHT, _cosine_similarity, _raw_similarity, _similarity, mmr_rerank
+from .diversify import (
+    AUTHOR_WEIGHT,
+    BETA,
+    _cosine_similarity,
+    _raw_similarity,
+    _similarity,
+    mmr_rerank,
+)
 from .embeddings import encode_float32_b64
+from .feed_debug import FeedDebugRecorder, feed_debug_scope
 
 
 def _post(uri: str, score: float, author_did: str | None = None) -> CandidatePost:
@@ -89,6 +97,24 @@ def test_equal_scores_diversity_drives_selection():
     result = mmr_rerank([a1, a2, b1])
     uris = [c.at_uri for c in result]
     assert uris.index("at://bob/1") < uris.index("at://alice/2")
+
+
+def test_first_debug_score_uses_weighted_relevance():
+    """The first pick has no diversity penalty, but its MMR score is still beta-weighted."""
+    a = _post("at://a/1", score=1.0, author_did="did:plc:a")
+    b = _post("at://b/1", score=0.5, author_did="did:plc:b")
+    rec = FeedDebugRecorder(feed_name="f", regenerated=False)
+
+    with feed_debug_scope(rec):
+        result = mmr_rerank([a, b])
+
+    assert result[0] is a
+    at_uri, relevance, score, author_penalty, content_penalty = rec.diversification[0]
+    assert at_uri == "at://a/1"
+    assert relevance == pytest.approx(1.0)
+    assert score == pytest.approx((1 - BETA) * relevance)
+    assert author_penalty == pytest.approx(0.0)
+    assert content_penalty == pytest.approx(0.0)
 
 
 # ---------------------------------------------------------------------------
