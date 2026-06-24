@@ -77,7 +77,7 @@ class HeavyRanker(Ranker):
                         history_author_dids = [author_did for _, _, author_did in user_history_embedding_pairs]
                         filtered_history_uris = [uri for uri, _, _ in user_history_embedding_pairs]
                         filtered_history_liked_at_times = [
-                            liked_at_time 
+                            liked_at_time
                             for uri, liked_at_time in zip(user_history_liked_uris, history_liked_at_times)
                             if uri in filtered_history_uris
                         ]
@@ -179,5 +179,5 @@ class HeavyRanker(Ranker):
             ranker_outputs,
             candidates_by_uri.values()
         )
-        
+
         return RankerResult(model=self.name, result=result)
