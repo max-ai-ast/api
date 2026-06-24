@@ -115,7 +115,9 @@ async def fetch_recent_liked_post_uris_and_times(
 
     Queries the ``likes`` index for documents where ``author_did`` matches
     *user_did*, sorted by ``created_at`` descending, and extracts the
-    ``subject_uri`` and ```` field from each hit.
+    ``subject_uri`` and ``created_at`` field from each hit.
+
+    Excludes posts without ``created_at`` time.
 
     When a request cache is active the result is memorized so repeat
     calls within the same request (e.g. post_similarity and the two-tower
@@ -133,7 +135,10 @@ async def fetch_recent_liked_post_uris_and_times(
         ):
             query = {
                 "bool": {
-                    "filter": [{"terms": {"author_did": user_dids}}],
+                    "filter": [
+                        {"terms": {"author_did": user_dids}},
+                        {"exists": {"field": "created_at"}},
+                    ],
                 }
             }
 
@@ -150,10 +155,9 @@ async def fetch_recent_liked_post_uris_and_times(
             times: list[AwareDatetime] = []
             for hit in data.get("hits", {}).get("hits", []):
                 uri = (hit.get("_source") or {}).get("subject_uri")
-                if uri:
-                    uris.append(uri)
                 time = (hit.get("_source") or {}).get("created_at")
-                if time:
+                if uri and time:
+                    uris.append(uri)
                     times.append(time)
             return uris, times
 

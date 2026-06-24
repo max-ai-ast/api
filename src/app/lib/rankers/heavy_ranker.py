@@ -45,14 +45,11 @@ class HeavyRanker(Ranker):
             get_inference_settings()
         )
 
-        valid_candidates = [candidate for candidate in candidates if candidate.at_uri is not None]
-        candidates_by_uri = {candidate.at_uri: candidate for candidate in candidates if candidate.at_uri is not None}
-
-
         async def _get_user_features() -> tuple[list[list[float]], list[str], list[AwareDatetime]]:
             async with timed(logger, "ranker_get_user_features", user_did=user_did):
                 user_history_vectors: list[list[float]] = []
                 history_author_dids: list[str] = []
+                filtered_history_liked_at_times: list[AwareDatetime] = []
                 user_history_liked_uris, history_liked_at_times = await fetch_recent_liked_post_uris_and_times(es, user_did)
 
                 rec = current_recorder()
@@ -78,8 +75,14 @@ class HeavyRanker(Ranker):
                     else:
                         user_history_vectors = [embedding for _, embedding, _ in user_history_embedding_pairs]
                         history_author_dids = [author_did for _, _, author_did in user_history_embedding_pairs]
+                        filtered_history_uris = [uri for uri, _, _ in user_history_embedding_pairs]
+                        filtered_history_liked_at_times = [
+                            liked_at_time 
+                            for uri, liked_at_time in zip(user_history_liked_uris, history_liked_at_times)
+                            if uri in filtered_history_uris
+                        ]
 
-                return user_history_vectors, history_author_dids, history_liked_at_times
+                return user_history_vectors, history_author_dids, filtered_history_liked_at_times
         # end _get_user_features()
 
 
@@ -109,7 +112,7 @@ class HeavyRanker(Ranker):
                 if not uris_embs_authors:
                     return None
 
-                ranked_candidates_input = [
+                candidates_with_embeddings = [
                     candidates_by_uri[at_uri]
                     for at_uri, _, _ in uris_embs_authors
                     if at_uri in candidates_by_uri
@@ -120,9 +123,11 @@ class HeavyRanker(Ranker):
                 author_dids = [
                     author_did for _, _, author_did in uris_embs_authors
                 ]
-                return ranked_candidates_input, input_post_embeddings, author_dids
+                return candidates_with_embeddings, input_post_embeddings, author_dids
         # end _get_candidate_features()
 
+
+        candidates_by_uri = {candidate.at_uri: candidate for candidate in candidates if candidate.at_uri is not None}
 
         user_features, candidate_features = await asyncio.gather(
             _get_user_features(),
@@ -139,14 +144,14 @@ class HeavyRanker(Ranker):
                     rank=rank_idx,
                     rank_score=None,
                 )
-                for rank_idx, candidate in enumerate(valid_candidates, start=1)
+                for rank_idx, candidate in enumerate(candidates_by_uri.values(), start=1)
                 if candidate.at_uri is not None
             ]
             return RankerResult(model=self.name, result=RankPredictResult(rankings=rankings))
 
         if candidate_features is None:
             return _return_empty_ranker_result(
-                "No valid features found for any of %d candidate posts of user %s"
+                f"No valid features found for any of {len(candidates_by_uri)} candidate posts of user {user_did}"
             )
         candidate_posts, candidate_post_embeddings, candidate_author_dids = candidate_features
 
@@ -172,7 +177,7 @@ class HeavyRanker(Ranker):
         result = get_rank_predict_results_from_candidates_and_scores(
             candidate_posts,
             ranker_outputs,
-            valid_candidates
+            candidates_by_uri.values()
         )
         
         return RankerResult(model=self.name, result=result)
