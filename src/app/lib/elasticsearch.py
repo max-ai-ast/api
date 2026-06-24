@@ -5,7 +5,6 @@ routers and candidate generators.
 """
 
 import logging
-from pydantic import AwareDatetime
 
 from elastic_transport import ObjectApiResponse
 from fastapi import HTTPException
@@ -109,7 +108,7 @@ async def fetch_recent_liked_post_uris_and_times(
     es,
     user_dids: str | list[str],
     limit: int = DEFAULT_LIKED_POSTS_LIMIT,
-) -> tuple[list[str], list[AwareDatetime]]:
+) -> tuple[list[str], list[str]]:
     """Return the AT URIs of posts the user most recently liked,
     along with the timestamp of that like.
 
@@ -129,7 +128,7 @@ async def fetch_recent_liked_post_uris_and_times(
     if not user_dids:
         return [], []
 
-    async def _fetch() -> tuple[list[str], list[AwareDatetime]]:
+    async def _fetch() -> tuple[list[str], list[str]]:
         async with timed(
             logger, "es_recent_likes_and_times", n_users=len(user_dids), limit=limit
         ):
@@ -152,7 +151,7 @@ async def fetch_recent_liked_post_uris_and_times(
 
             data = unwrap_es_response(resp)
             uris: list[str] = []
-            times: list[AwareDatetime] = []
+            times: list[str] = []
             for hit in data.get("hits", {}).get("hits", []):
                 uri = (hit.get("_source") or {}).get("subject_uri")
                 time = (hit.get("_source") or {}).get("created_at")

@@ -3,7 +3,6 @@
 
 import asyncio
 import logging
-from pydantic import AwareDatetime
 
 from ...models import RankedCandidate, CandidatePost, RankPredictResult
 from .base import Ranker, RankerResult
@@ -45,11 +44,11 @@ class HeavyRanker(Ranker):
             get_inference_settings()
         )
 
-        async def _get_user_features() -> tuple[list[list[float]], list[str], list[AwareDatetime]]:
+        async def _get_user_features() -> tuple[list[list[float]], list[str], list[str]]:
             async with timed(logger, "ranker_get_user_features", user_did=user_did):
                 user_history_vectors: list[list[float]] = []
                 history_author_dids: list[str] = []
-                filtered_history_liked_at_times: list[AwareDatetime] = []
+                filtered_history_liked_at_times: list[str] = []
                 user_history_liked_uris, history_liked_at_times = await fetch_recent_liked_post_uris_and_times(es, user_did)
 
                 rec = current_recorder()

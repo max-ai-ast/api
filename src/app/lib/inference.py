@@ -8,7 +8,6 @@ import asyncio
 import logging
 import os
 import time
-from pydantic import AwareDatetime
 
 from .elasticsearch import fetch_recent_liked_post_uris, fetch_post_embeddings_and_authors
 from .feed_debug import current_recorder
@@ -159,7 +158,7 @@ async def predict_user_tower_single(
 async def predict_heavy_ranker_single_user(
     history_embeddings: list[list[float]],
     history_author_dids: list[str],
-    history_liked_at_times: list[AwareDatetime],
+    history_liked_at_times: list[str],
     candidate_post_embeddings: list[list[float]],
     candidate_author_dids: list[str],
     *,
