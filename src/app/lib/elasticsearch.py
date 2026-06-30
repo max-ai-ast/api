@@ -104,9 +104,73 @@ async def fetch_recent_liked_post_uris(
     return await cache.get_or_compute(key, _fetch)
 
 
+async def fetch_recent_liked_post_uris_and_times(
+    es,
+    user_dids: str | list[str],
+    limit: int = DEFAULT_LIKED_POSTS_LIMIT,
+) -> tuple[list[str], list[str]]:
+    """Return the AT URIs of posts the user most recently liked,
+    along with the timestamp of that like.
+
+    Queries the ``likes`` index for documents where ``author_did`` matches
+    *user_did*, sorted by ``created_at`` descending, and extracts the
+    ``subject_uri`` and ``created_at`` field from each hit.
+
+    Excludes posts without ``created_at`` time.
+
+    When a request cache is active the result is memorized so repeat
+    calls within the same request (e.g. post_similarity and the two-tower
+    ranker) share a single ES round-trip.
+    """
+    if isinstance(user_dids, str):
+        user_dids = [user_dids]
+
+    if not user_dids:
+        return [], []
+
+    async def _fetch() -> tuple[list[str], list[str]]:
+        async with timed(
+            logger, "es_recent_likes_and_times", n_users=len(user_dids), limit=limit
+        ):
+            query = {
+                "bool": {
+                    "filter": [
+                        {"terms": {"author_did": user_dids}},
+                        {"exists": {"field": "created_at"}},
+                    ],
+                }
+            }
+
+            resp = await es.search(
+                index="likes",
+                query=query,
+                size=limit,
+                sort=[{"created_at": "desc"}],
+                _source=["subject_uri", "created_at"],
+            )
+
+            data = unwrap_es_response(resp)
+            uris: list[str] = []
+            times: list[str] = []
+            for hit in data.get("hits", {}).get("hits", []):
+                uri = (hit.get("_source") or {}).get("subject_uri")
+                time = (hit.get("_source") or {}).get("created_at")
+                if uri and time:
+                    uris.append(uri)
+                    times.append(time)
+            return uris, times
+
+    cache = get_request_cache()
+    if cache is None:
+        return await _fetch()
+    key = ("fetch_recent_liked_post_uris_and_times", tuple(sorted(user_dids)), limit)
+    return await cache.get_or_compute(key, _fetch)
+
+
 async def fetch_post_embeddings(
     es,
     at_uris: list[str],
+    index: str = "posts",
 ) -> list[tuple[str, list[float]]]:
     """Fetch MiniLM L12 embeddings for a list of post AT URIs.
 
@@ -124,7 +188,7 @@ async def fetch_post_embeddings(
             query = {"terms": {"at_uri": at_uris}}
 
             resp = await es.search(
-                index="posts",
+                index=index,
                 query=query,
                 size=len(at_uris),
                 _source=[
@@ -159,13 +223,14 @@ async def fetch_post_embeddings(
     cache = get_request_cache()
     if cache is None:
         return await _fetch()
-    key = ("fetch_post_embeddings", tuple(at_uris))
+    key = ("fetch_post_embeddings", index, tuple(at_uris))
     return await cache.get_or_compute(key, _fetch)
 
 
 async def fetch_post_embeddings_and_authors(
     es,
     at_uris: list[str],
+    index: str = "posts",
 ) -> list[tuple[str, list[float], str]]:
     """Fetch MiniLM L12 embeddings for a list of post AT URIs, as well as their author DIDs.
 
@@ -184,7 +249,7 @@ async def fetch_post_embeddings_and_authors(
             query = {"terms": {"at_uri": at_uris}}
 
             resp = await es.search(
-                index="posts",
+                index=index,
                 query=query,
                 size=len(at_uris),
                 _source=[
@@ -225,5 +290,5 @@ async def fetch_post_embeddings_and_authors(
     cache = get_request_cache()
     if cache is None:
         return await _fetch()
-    key = ("fetch_post_embeddings_and_authors", tuple(at_uris))
+    key = ("fetch_post_embeddings_and_authors", index, tuple(at_uris))
     return await cache.get_or_compute(key, _fetch)
