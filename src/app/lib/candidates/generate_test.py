@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from typing import cast
 
 import pytest
 
@@ -9,7 +10,7 @@ from ...models import CandidateGenerateRequest, GeneratorSpec
 from ..candidates import generate as generate_module
 from ..candidates.base import CandidateGenerator, CandidateResult
 from ..candidates.generate import GeneratorError, run_generate
-from ..metrics import set_metric_collector
+from ..metrics import MetricCollector, set_metric_collector
 
 
 # ---------------------------------------------------------------------------
@@ -75,9 +76,10 @@ def _make_request(
     infill: str | None = None,
 ) -> CandidateGenerateRequest:
     return CandidateGenerateRequest(
-        generators=[GeneratorSpec(name=generator_name)],
+        generators=[GeneratorSpec(name=generator_name, weight=1.0)],
         user_did="did:plc:test",
         num_candidates=num_candidates,
+        video_only=False,
         infill=infill,
     )
 
@@ -103,7 +105,7 @@ class TestGeneratorTimeout:
         monkeypatch.setattr(generate_module, "_generator_timeout_sec", lambda: 0.01)
         _stub_generators(monkeypatch, {"post_similarity": _HangingGenerator("post_similarity")})
         mc = FakeMetricCollector()
-        set_metric_collector(mc)
+        set_metric_collector(cast(MetricCollector, mc))
 
         result = await run_generate(_make_request("post_similarity"), es=None, swallow_errors=True)
 
@@ -155,7 +157,7 @@ class TestGeneratorTimeout:
         monkeypatch.setattr(generate_module, "_generator_timeout_sec", lambda: 0.01)
         _stub_generators(monkeypatch, {"post_similarity": _HangingGenerator("post_similarity")})
         mc = FakeMetricCollector()
-        set_metric_collector(mc)
+        set_metric_collector(cast(MetricCollector, mc))
 
         with pytest.raises(GeneratorError):
             await run_generate(_make_request("post_similarity"), es=None, swallow_errors=False)
@@ -171,7 +173,7 @@ class TestGeneratorTimeout:
         gen = _FailingGenerator(ValueError("boom"), name="network_likes")
         _stub_generators(monkeypatch, {"network_likes": gen})
         mc = FakeMetricCollector()
-        set_metric_collector(mc)
+        set_metric_collector(cast(MetricCollector, mc))
 
         result = await run_generate(_make_request("network_likes"), es=None, swallow_errors=True)
 
@@ -200,7 +202,7 @@ class TestInfillGeneratorTimeout:
             "popular": _HangingGenerator("popular"),
         })
         mc = FakeMetricCollector()
-        set_metric_collector(mc)
+        set_metric_collector(cast(MetricCollector, mc))
 
         result = await run_generate(
             _make_request("random", num_candidates=5, infill="popular"),
@@ -244,7 +246,7 @@ class TestInfillGeneratorTimeout:
             "popular": _HangingGenerator("popular"),
         })
         mc = FakeMetricCollector()
-        set_metric_collector(mc)
+        set_metric_collector(cast(MetricCollector, mc))
 
         with pytest.raises(GeneratorError):
             await run_generate(
@@ -266,7 +268,7 @@ class TestInfillGeneratorTimeout:
             "popular": _FailingGenerator(RuntimeError("db down"), name="popular"),
         })
         mc = FakeMetricCollector()
-        set_metric_collector(mc)
+        set_metric_collector(cast(MetricCollector, mc))
 
         result = await run_generate(
             _make_request("random", num_candidates=5, infill="popular"),
