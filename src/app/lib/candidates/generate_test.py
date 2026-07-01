@@ -102,7 +102,7 @@ def _reset_metric_collector():
 class TestGeneratorTimeout:
     @pytest.mark.asyncio
     async def test_timeout_swallow_returns_no_candidates_and_records_metric(self, monkeypatch):
-        monkeypatch.setattr(generate_module, "_generator_timeout_sec", lambda: 0.01)
+        monkeypatch.setattr(generate_module, "_GENERATOR_TIMEOUT_SEC", 0.01)
         _stub_generators(monkeypatch, {"post_similarity": _HangingGenerator("post_similarity")})
         mc = FakeMetricCollector()
         set_metric_collector(cast(MetricCollector, mc))
@@ -122,7 +122,7 @@ class TestGeneratorTimeout:
 
     @pytest.mark.asyncio
     async def test_timeout_swallow_logs_warning_not_exception(self, monkeypatch, caplog):
-        monkeypatch.setattr(generate_module, "_generator_timeout_sec", lambda: 0.01)
+        monkeypatch.setattr(generate_module, "_GENERATOR_TIMEOUT_SEC", 0.01)
         _stub_generators(monkeypatch, {"post_similarity": _HangingGenerator("post_similarity")})
 
         with caplog.at_level(logging.WARNING):
@@ -141,7 +141,7 @@ class TestGeneratorTimeout:
 
     @pytest.mark.asyncio
     async def test_timeout_no_swallow_raises_generator_error_promptly(self, monkeypatch):
-        monkeypatch.setattr(generate_module, "_generator_timeout_sec", lambda: 0.01)
+        monkeypatch.setattr(generate_module, "_GENERATOR_TIMEOUT_SEC", 0.01)
         _stub_generators(monkeypatch, {"post_similarity": _HangingGenerator("post_similarity")})
 
         with pytest.raises(GeneratorError) as exc_info:
@@ -154,7 +154,7 @@ class TestGeneratorTimeout:
 
     @pytest.mark.asyncio
     async def test_timeout_no_swallow_records_metric_before_raising(self, monkeypatch):
-        monkeypatch.setattr(generate_module, "_generator_timeout_sec", lambda: 0.01)
+        monkeypatch.setattr(generate_module, "_GENERATOR_TIMEOUT_SEC", 0.01)
         _stub_generators(monkeypatch, {"post_similarity": _HangingGenerator("post_similarity")})
         mc = FakeMetricCollector()
         set_metric_collector(cast(MetricCollector, mc))
@@ -196,7 +196,7 @@ class TestGeneratorTimeout:
 class TestInfillGeneratorTimeout:
     @pytest.mark.asyncio
     async def test_infill_timeout_swallow_returns_empty_and_records_metric(self, monkeypatch):
-        monkeypatch.setattr(generate_module, "_generator_timeout_sec", lambda: 0.01)
+        monkeypatch.setattr(generate_module, "_GENERATOR_TIMEOUT_SEC", 0.01)
         _stub_generators(monkeypatch, {
             "random": _EmptyGenerator("random"),
             "popular": _HangingGenerator("popular"),
@@ -222,7 +222,7 @@ class TestInfillGeneratorTimeout:
 
     @pytest.mark.asyncio
     async def test_infill_timeout_no_swallow_raises_generator_error_with_is_infill(self, monkeypatch):
-        monkeypatch.setattr(generate_module, "_generator_timeout_sec", lambda: 0.01)
+        monkeypatch.setattr(generate_module, "_GENERATOR_TIMEOUT_SEC", 0.01)
         _stub_generators(monkeypatch, {
             "random": _EmptyGenerator("random"),
             "popular": _HangingGenerator("popular"),
@@ -240,7 +240,7 @@ class TestInfillGeneratorTimeout:
 
     @pytest.mark.asyncio
     async def test_infill_timeout_no_swallow_records_metric(self, monkeypatch):
-        monkeypatch.setattr(generate_module, "_generator_timeout_sec", lambda: 0.01)
+        monkeypatch.setattr(generate_module, "_GENERATOR_TIMEOUT_SEC", 0.01)
         _stub_generators(monkeypatch, {
             "random": _EmptyGenerator("random"),
             "popular": _HangingGenerator("popular"),

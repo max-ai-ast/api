@@ -25,12 +25,12 @@ from ..telemetry import timed
 logger = logging.getLogger(__name__)
 
 
-def _generator_timeout_sec() -> float:
-    """Read per-call so the value tracks env changes during dev."""
-    try:
-        return float(os.environ.get("GE_CANDIDATE_GENERATOR_TIMEOUT_SEC", "10"))
-    except ValueError:
-        return 10.0
+try:
+    _GENERATOR_TIMEOUT_SEC: float = float(
+        os.environ.get("GE_CANDIDATE_GENERATOR_TIMEOUT_SEC", "10")
+    )
+except ValueError:
+    _GENERATOR_TIMEOUT_SEC = 10.0
 
 
 # ---------------------------------------------------------------------------
@@ -141,13 +141,13 @@ async def run_generate(
                         video_only=request.video_only,
                         exclude_uris=request.exclude_uris or None,
                     ),
-                    timeout=_generator_timeout_sec(),
+                    timeout=_GENERATOR_TIMEOUT_SEC,
                 )
         except asyncio.TimeoutError as exc:
             logger.warning(
                 "Candidate generator '%s' timed out after %.1fs",
                 spec.name,
-                _generator_timeout_sec(),
+                _GENERATOR_TIMEOUT_SEC,
             )
             if mc := get_metric_collector():
                 mc.record(
@@ -207,13 +207,13 @@ async def run_generate(
                     video_only=request.video_only,
                     exclude_uris=request.exclude_uris or None,
                 ),
-                timeout=_generator_timeout_sec(),
+                timeout=_GENERATOR_TIMEOUT_SEC,
             )
         except asyncio.TimeoutError as exc:
             logger.warning(
                 "Infill generator '%s' timed out after %.1fs",
                 request.infill,
-                _generator_timeout_sec(),
+                _GENERATOR_TIMEOUT_SEC,
             )
             if mc := get_metric_collector():
                 mc.record(
