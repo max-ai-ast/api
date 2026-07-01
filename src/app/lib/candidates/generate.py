@@ -27,10 +27,10 @@ logger = logging.getLogger(__name__)
 
 try:
     _GENERATOR_TIMEOUT_SEC: float = float(
-        os.environ.get("GE_CANDIDATE_GENERATOR_TIMEOUT_SEC", "10")
+        os.environ.get("GE_CANDIDATE_GENERATOR_TIMEOUT_SEC", "5")
     )
 except ValueError:
-    _GENERATOR_TIMEOUT_SEC = 10.0
+    _GENERATOR_TIMEOUT_SEC = 5.0
 
 
 # ---------------------------------------------------------------------------
